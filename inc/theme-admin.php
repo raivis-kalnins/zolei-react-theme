@@ -186,7 +186,16 @@ function zolei_admin_page() {
         check_admin_referer('zolei_save_settings_action','zolei_save_settings_nonce');
         update_option('zolei_contact_email', sanitize_email(wp_unslash($_POST['zolei_contact_email'] ?? '')));
         update_option('zolei_contact_phone', sanitize_text_field(wp_unslash($_POST['zolei_contact_phone'] ?? '')));
+        update_option('zolei_contact_address', sanitize_text_field(wp_unslash($_POST['zolei_contact_address'] ?? '')));
         update_option('zolei_hero_subline', sanitize_text_field(wp_unslash($_POST['zolei_hero_subline'] ?? '')));
+        $ga4 = strtoupper(sanitize_text_field(wp_unslash($_POST['zolei_ga4_measurement_id'] ?? '')));
+        if ($ga4 && !preg_match('/^G-[A-Z0-9]{6,20}$/', $ga4)) { $ga4 = ''; }
+        $gtm = strtoupper(sanitize_text_field(wp_unslash($_POST['zolei_gtm_container_id'] ?? '')));
+        if ($gtm && !preg_match('/^GTM-[A-Z0-9]{4,20}$/', $gtm)) { $gtm = ''; }
+        update_option('zolei_ga4_measurement_id', $ga4);
+        update_option('zolei_gtm_container_id', $gtm);
+        update_option('zolei_google_site_verification', sanitize_text_field(wp_unslash($_POST['zolei_google_site_verification'] ?? '')));
+        update_option('zolei_meta_description', sanitize_textarea_field(wp_unslash($_POST['zolei_meta_description'] ?? '')));
         update_option('zolei_hcaptcha_site_key', sanitize_text_field(wp_unslash($_POST['zolei_hcaptcha_site_key'] ?? '')));
         update_option('zolei_hcaptcha_secret_key', sanitize_text_field(wp_unslash($_POST['zolei_hcaptcha_secret_key'] ?? '')));
         update_option('zolei_pdf_download_on_import', !empty($_POST['zolei_pdf_download_on_import']) ? 1 : 0);
@@ -230,6 +239,7 @@ function zolei_admin_page() {
     $compression_options = function_exists('zolei_pdf_compression_quality_options') ? zolei_pdf_compression_quality_options() : array('ebook'=>'Recommended good quality');
     $compression_quality = get_option('zolei_pdf_compression_quality','ebook');
     $compression_status = function_exists('zolei_pdf_compression_status') ? zolei_pdf_compression_status() : '';
+    $hcaptcha_source = function_exists('zolei_hcaptcha_source') ? zolei_hcaptcha_source() : 'none';
     $manifest_count = 0;
     $manifest_file = get_template_directory().'/assets/data/zolei-pdfs.json';
     if (file_exists($manifest_file)) { $manifest_data = json_decode(file_get_contents($manifest_file), true); if (is_array($manifest_data)) { $manifest_count = count($manifest_data); } }
@@ -242,6 +252,13 @@ function zolei_admin_page() {
       <?php if($pdf_error): ?><div class="notice notice-error is-dismissible"><p><?php echo esc_html($pdf_error); ?></p></div><?php endif; ?>
       <?php if($gallery_message): ?><div class="notice notice-success is-dismissible"><p><?php echo esc_html($gallery_message); ?></p></div><?php endif; ?>
       <?php if($gallery_error): ?><div class="notice notice-error is-dismissible"><p><?php echo esc_html($gallery_error); ?></p></div><?php endif; ?>
+      <?php if ($hcaptcha_source === 'wpbb'): ?>
+        <div class="notice notice-success inline"><p><strong><?php esc_html_e('hCaptcha is active.','zolei-react'); ?></strong> <?php esc_html_e('The React contact form is using the enabled WP BBuilder Dynamic Forms hCaptcha keys automatically.','zolei-react'); ?></p></div>
+      <?php elseif ($hcaptcha_source === 'theme'): ?>
+        <div class="notice notice-success inline"><p><strong><?php esc_html_e('hCaptcha is active.','zolei-react'); ?></strong> <?php esc_html_e('The React contact form is using the Zolei control panel keys below.','zolei-react'); ?></p></div>
+      <?php else: ?>
+        <div class="notice notice-warning inline"><p><strong><?php esc_html_e('hCaptcha is not active on the React contact form.','zolei-react'); ?></strong> <?php esc_html_e('Enable hCaptcha and save both keys in WP BBuilder Dynamic Forms, or enter both keys below.','zolei-react'); ?></p></div>
+      <?php endif; ?>
 
       <form method="post" class="zole-admin-card zole-admin-main-settings">
         <?php wp_nonce_field('zolei_save_settings_action','zolei_save_settings_nonce'); ?>
@@ -249,9 +266,14 @@ function zolei_admin_page() {
         <div class="zole-admin-grid-2">
           <label><?php esc_html_e('Contact email','zolei-react'); ?><input class="regular-text" name="zolei_contact_email" value="<?php echo esc_attr(get_option('zolei_contact_email','info@zolei.lv')); ?>"></label>
           <label><?php esc_html_e('Contact phone','zolei-react'); ?><input class="regular-text" name="zolei_contact_phone" value="<?php echo esc_attr(get_option('zolei_contact_phone','')); ?>"></label>
+          <label><?php esc_html_e('Contact address','zolei-react'); ?><input class="large-text" name="zolei_contact_address" value="<?php echo esc_attr(get_option('zolei_contact_address','Daugavas ielā 1C, Mārupes novads, Mārupe, Rīgas rajons, LV-2167')); ?>"></label>
           <label><?php esc_html_e('Hero subline','zolei-react'); ?><input class="large-text" name="zolei_hero_subline" value="<?php echo esc_attr(get_option('zolei_hero_subline','')); ?>"></label>
-          <label><?php esc_html_e('hCaptcha site key','zolei-react'); ?><input class="large-text code" name="zolei_hcaptcha_site_key" value="<?php echo esc_attr(get_option('zolei_hcaptcha_site_key','')); ?>"></label>
-          <label><?php esc_html_e('hCaptcha secret key','zolei-react'); ?><input class="large-text code" name="zolei_hcaptcha_secret_key" value="<?php echo esc_attr(get_option('zolei_hcaptcha_secret_key','')); ?>"></label>
+          <label><?php esc_html_e('GA4 Measurement ID','zolei-react'); ?><input class="regular-text code" name="zolei_ga4_measurement_id" value="<?php echo esc_attr(get_option('zolei_ga4_measurement_id','')); ?>" placeholder="G-XXXXXXXXXX"><span class="description"><?php esc_html_e('Used only when no GTM container is set.','zolei-react'); ?></span></label>
+          <label><?php esc_html_e('Google Tag Manager container','zolei-react'); ?><input class="regular-text code" name="zolei_gtm_container_id" value="<?php echo esc_attr(get_option('zolei_gtm_container_id','')); ?>" placeholder="GTM-XXXXXXX"><span class="description"><?php esc_html_e('Preferred for Analytics and other marketing tags.','zolei-react'); ?></span></label>
+          <label><?php esc_html_e('Google site verification','zolei-react'); ?><input class="large-text code" name="zolei_google_site_verification" value="<?php echo esc_attr(get_option('zolei_google_site_verification','')); ?>"></label>
+          <label><?php esc_html_e('Default SEO meta description','zolei-react'); ?><textarea rows="3" class="large-text" name="zolei_meta_description"><?php echo esc_textarea(get_option('zolei_meta_description','Latvijas Zolītes federācija — turnīru kalendārs, noteikumi, rezultāti, reitingi un federācijas informācija.')); ?></textarea></label>
+          <label><?php esc_html_e('hCaptcha site key (optional override)','zolei-react'); ?><input class="large-text code" name="zolei_hcaptcha_site_key" value="<?php echo esc_attr(get_option('zolei_hcaptcha_site_key','')); ?>"><span class="description"><?php esc_html_e('Leave blank to use WP BBuilder → Dynamic Forms → hCaptcha settings automatically.','zolei-react'); ?></span></label>
+          <label><?php esc_html_e('hCaptcha secret key (optional override)','zolei-react'); ?><input class="large-text code" name="zolei_hcaptcha_secret_key" type="password" autocomplete="new-password" value="<?php echo esc_attr(get_option('zolei_hcaptcha_secret_key','')); ?>"><span class="description"><?php esc_html_e('The frontend never exposes this secret key. Both override fields must be filled to override WP BBuilder.','zolei-react'); ?></span></label>
           <label><?php esc_html_e('Ghostscript binary path','zolei-react'); ?><input class="regular-text code" name="zolei_pdf_compression_binary" value="<?php echo esc_attr(get_option('zolei_pdf_compression_binary','')); ?>" placeholder="gs"><span class="description"><?php echo esc_html($compression_status); ?></span></label>
         </div>
         <p><label><input type="checkbox" name="zolei_pdf_compression_enabled" value="1" <?php checked(function_exists('zolei_pdf_compression_enabled') ? zolei_pdf_compression_enabled() : true); ?>> <?php esc_html_e('Automatically compress demo-import PDFs and every new PDF upload. Keep original only if compression is not smaller.','zolei-react'); ?></label></p>

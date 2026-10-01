@@ -1,6 +1,15 @@
 # Zolei React Theme
 
-Version 1.6.0 packages the new React-style WordPress theme for Zolei.lv with WP BBuilder compatibility and old-site content migration helpers.
+Version 3.1.1 packages the launch-ready React-style WordPress theme for Zolei.lv with WP BBuilder compatibility, old-site content migration helpers, mobile tournament improvements and production integrations.
+
+
+## v3.1.1 hCaptcha + mobile tournament fix
+
+- The React contact form now automatically uses **WP BBuilder → Dynamic Forms → hCaptcha** when hCaptcha is enabled there and both keys are saved.
+- Zolei control panel hCaptcha fields remain available only as an optional override, so keys do not need to be duplicated.
+- Server-side hCaptcha verification uses the same resolved configuration as the frontend widget.
+- Mobile tournament rows now use a fixed compact date-number column, keeping every event description aligned and readable.
+- Very narrow screens use a slightly smaller date block and hCaptcha is prevented from forcing horizontal page overflow.
 
 ## What is included
 
@@ -99,3 +108,14 @@ By default the PDF records point to old-site source URLs. This is fastest for a 
 - News cards use three distinct packaged images with no overlay text on the image.
 - Gallery thumbnails are generated larger and higher quality, with higher-quality AVIF when supported.
 - Archive info box aligns beside the PDF cards.
+
+
+## 3.1.0 launch-readiness update (2026-10-01)
+
+- Re-synced the 12-month tournament calendar from the supplied live `zolei.lv` database backup (80 published event rows; live page edit dates preserved in the calendar data file).
+- Reworked the mobile calendar into large, readable month accordions; the current month opens by default and `?month=<slug>` opens a requested month.
+- Restored the client-supplied Latvian Zolīte Federation logo in the hero on an explicit white card surface.
+- Added safe GA4 / Google Tag Manager / Search Console fields in **Appearance → Zolei control panel**. GTM takes precedence over direct GA4 to avoid duplicate pageviews.
+- Added basic canonical, meta description, Open Graph, Twitter card and Organization JSON-LD output when no major SEO plugin is active.
+- Added legacy month URL redirects to the homepage calendar so old `/janvaris/` … `/decembris/` links do not land on 404 after cutover.
+- Updated mobile event cards and document links for easier scanning and tapping.

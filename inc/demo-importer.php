@@ -386,7 +386,7 @@ function zolei_demo_import_one_page_sections() {
 
 function zolei_demo_trash_extra_generated_pages() {
     $keep = array('sakums','home');
-    $generated = array('jaunumi','turniri','zoles-noteikumi','rezultati','reitingi','meistari','galerija','kontakti','news','calendar','rules','results','ratings','masters','gallery','ethics-code','contact');
+    $generated = array('jaunumi','turniri','rezultati','reitingi','meistari','galerija','news','calendar','rules','results','ratings','masters','gallery','ethics-code','contact');
     foreach($generated as $slug){
         if(in_array($slug,$keep,true)) continue;
         $page = zolei_demo_find_post($slug,'page');
@@ -397,13 +397,17 @@ function zolei_demo_trash_extra_generated_pages() {
 
 function zolei_demo_import_info_pages() {
     $pages = array(
-        array('valde-un-kontakti', 'Valde un kontakti', '<!-- wp:heading --><h2>Valde un kontakti</h2><!-- /wp:heading --><!-- wp:paragraph --><p><strong>Uldis Vītols:</strong> info@zolei.lv</p><!-- /wp:paragraph --><!-- wp:paragraph --><p><strong>Elgars Sapats:</strong> info@zolei.lv, Tel. 22315099</p><!-- /wp:paragraph -->', 'lv'),
-        array('etikas-kodekss', 'Ētikas kodekss', '<!-- wp:heading --><h2>Zolītes spēles ētikas kodekss</h2><!-- /wp:heading --><!-- wp:paragraph --><p>Ētikas kodekss nosaka spēlētāju uzvedības pamatprincipus un palīdz uzturēt godīgu, cieņpilnu spēles vidi.</p><!-- /wp:paragraph --><!-- wp:list {"ordered":true} --><ol><li>Spēlē atbilstoši noteikumiem.</li><li>Izturies pret citiem spēlētājiem ar cieņu.</li><li>Nemānies un negodīgi neizmanto citus spēlētājus.</li><li>Cieni turnīra organizētāju un inventāru.</li><li>Strīdus risini mierīgi un korekti.</li></ol><!-- /wp:list -->', 'lv'),
-        array('nolikumi', 'Nolikumi', '<!-- wp:heading --><h2>Nolikumi</h2><!-- /wp:heading --><!-- wp:paragraph --><p>Turnīru nolikumi un saistītie PDF dokumenti.</p><!-- /wp:paragraph --><!-- wp:shortcode -->[zolei_pdf_section section="rules"]<!-- /wp:shortcode -->', 'lv'),
+        array('valde-un-kontakti', 'Valde un kontakti', '<p><strong>Uldis Vītols:</strong> info@zolei.lv</p><p><strong>Elgars Sapats:</strong> info@zolei.lv, Tel. 22315099</p>'),
+        array('etikas-kodekss', 'Ētikas kodekss', '<p>Zolītes spēles ētikas kodekss.</p>'),
+        array('nolikumi', 'Nolikumi', '<p>Turnīru nolikumi un saistītie PDF dokumenti.</p><!-- wp:shortcode -->[zolei_pdf_section section="rules"]<!-- /wp:shortcode -->'),
+        array('zoles-noteikumi', 'Zoles noteikumi', '<p>Klasiskās zoles noteikumi.</p>'),
+        array('meistari-lielmeistari', 'Meistari & Lielmeistari', '<p>Meistaru un lielmeistaru informācija.</p>'),
+        array('kontakti', 'Kontakti', '<p>Daugavas iela 1C, Mārupe, LV-2167 · +371 22315099 · info@zolei.lv</p>'),
     );
     $count = 0;
     foreach ($pages as $p) {
-        $id = zolei_demo_upsert($p[0], $p[1], $p[2], 'page', $p[3]);
+        $content = function_exists('zolei_demo_legacy_content_for') ? zolei_demo_legacy_content_for($p[0], $p[2], $p[1]) : $p[2];
+        $id = zolei_demo_upsert($p[0], $p[1], $content, 'page', 'lv');
         if (!is_wp_error($id)) { $count++; }
     }
     return $count;

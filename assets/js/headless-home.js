@@ -42,7 +42,7 @@
           e('div', { className: 'zole-hero-card' },
             e('div', { className: 'zole-hero-card-inner' },
               e('div', { className: 'zole-card-main' },
-                e('img', { className: 'zole-logo-big', src: data.logo, alt: 'Zolei.lv' }),
+                e('div', { className: 'zole-federation-logo-wrap' }, e('img', { className: 'zole-logo-big', src: data.logo, alt: L.kicker || 'Latvijas Zolītes federācija' })),
                 e('div', { className: 'zole-card-symbol' }, '♛'),
                 e('h2', { className: 'h3 fw-bold mb-0' }, L.cardTitle),
                 e('p', { className: 'mb-0 text-muted' }, L.cardText),
@@ -79,6 +79,19 @@
     );
   }
 
+  function EventCard(ev, idx){
+    const links = Array.isArray(ev.links) ? ev.links : [];
+    return e('article', { className: 'zole-event', key: idx },
+      e('div', { className: 'zole-event-date', 'aria-label': (L.dayLabel || 'Day') + ' ' + (ev.day || '') }, ev.day || '—'),
+      e('div', { className: 'zole-event-copy' },
+        e('p', null, ev.title),
+        links.length ? e('div', { className: 'zole-event-links' }, links.slice(0,2).map(function(link, i){
+          return e('a', { key: (link.url || '') + i, href: link.url, target: '_blank', rel: 'noopener noreferrer' }, link.label || L.documentLabel || 'Dokuments');
+        })) : null
+      )
+    );
+  }
+
   function Calendar(){
     return e('section', { id: 'calendar', className: 'zole-section zole-calendar-wrap' },
       e('div', { className: 'container' },
@@ -90,29 +103,44 @@
           ),
           e('div', { className: 'col-lg-4 text-lg-end' }, e(Btn, { href: urls.fullCalendar, kind: 'zole-btn-green' }, L.fullCalendar))
         ),
-        e('div', { className: 'zole-month-tabs', role: 'tablist' }, months.map(function(m, i){
+        e('div', { className: 'zole-calendar-desktop' },
+          e('div', { className: 'zole-month-tabs', role: 'tablist', 'aria-label': L.monthTabs || 'Months' }, months.map(function(m, i){
+            const active = i + 1 === current;
+            return e('button', {
+              key: m.slug,
+              className: 'zole-month-tab ' + (active ? 'active' : ''),
+              id: 'tab-' + m.slug,
+              'data-bs-toggle': 'pill',
+              'data-bs-target': '#pane-' + m.slug,
+              type: 'button',
+              role: 'tab',
+              'aria-controls': 'pane-' + m.slug,
+              'aria-selected': active ? 'true' : 'false'
+            }, e('span', null, m.name), e('em', null, (m.events || []).length));
+          })),
+          e('div', { className: 'tab-content zole-calendar-panel' }, months.map(function(m, i){
+            const active = i + 1 === current;
+            return e('div', { key: m.slug, className: 'tab-pane fade ' + (active ? 'show active' : ''), id: 'pane-' + m.slug, role: 'tabpanel', 'aria-labelledby': 'tab-' + m.slug },
+              e('div', { className: 'zole-month-head' },
+                e('div', null, e('h3', null, m.name), e('p', null, L.monthSource)),
+                e('a', { className: 'zole-month-link', href: m.url }, L.monthPage + ' →')
+              ),
+              e('div', { className: 'zole-event-grid' }, (m.events || []).length ? (m.events || []).map(EventCard) : e('p', { className: 'zole-empty-events' }, L.noEvents || 'Nav publicētu turnīru.'))
+            );
+          }))
+        ),
+        e('div', { className: 'zole-calendar-mobile', 'aria-label': L.monthTabs || 'Months' }, months.map(function(m, i){
           const active = i + 1 === current;
-          return e('button', {
-            key: m.slug,
-            className: 'zole-month-tab ' + (active ? 'active' : ''),
-            id: 'tab-' + m.slug,
-            'data-bs-toggle': 'pill',
-            'data-bs-target': '#pane-' + m.slug,
-            type: 'button',
-            role: 'tab',
-            'aria-selected': active ? 'true' : 'false'
-          }, e('span', null, m.name), e('em', null, (m.events || []).length));
-        })),
-        e('div', { className: 'tab-content zole-calendar-panel' }, months.map(function(m, i){
-          const active = i + 1 === current;
-          return e('div', { key: m.slug, className: 'tab-pane fade ' + (active ? 'show active' : ''), id: 'pane-' + m.slug, role: 'tabpanel' },
-            e('div', { className: 'zole-month-head' },
-              e('div', null, e('h3', null, m.name), e('p', null, L.monthSource)),
-              e('a', { className: 'fw-bold text-success', href: m.url }, L.monthPage + ' →')
+          return e('details', { className: 'zole-mobile-month', key: m.slug, open: active },
+            e('summary', { id: 'mobile-month-' + m.slug },
+              e('span', { className: 'zole-mobile-month-name' }, m.name),
+              e('span', { className: 'zole-mobile-month-count' }, (m.events || []).length),
+              e('span', { className: 'zole-mobile-month-chevron', 'aria-hidden': 'true' }, '⌄')
             ),
-            e('div', { className: 'zole-event-grid' }, (m.events || []).map(function(ev, idx){
-              return e('article', { className: 'zole-event', key: idx }, e('div', { className: 'zole-event-date' }, ev.day), e('p', null, ev.title));
-            }))
+            e('div', { className: 'zole-mobile-month-body' },
+              e('p', { className: 'zole-mobile-month-source' }, L.monthSource),
+              e('div', { className: 'zole-event-grid' }, (m.events || []).length ? (m.events || []).map(EventCard) : e('p', { className: 'zole-empty-events' }, L.noEvents || 'Nav publicētu turnīru.'))
+            )
           );
         }))
       )
@@ -130,7 +158,8 @@
               e('p', null, L.rulesText),
               e('div', { className: 'mt-4' }, [L.rule1, L.rule2, L.rule3, L.rule4].map(function(r, i){
                 return e('div', { className: 'zole-rule-row', key: i }, e('span', { className: 'zole-check' }, '✓'), e('span', null, r));
-              }))
+              })),
+              e('div', { className: 'mt-4' }, e(Btn, { href: urls.fullRules || '/zoles-noteikumi/', kind: 'zole-btn-gold' }, L.fullRulesBtn || 'Pilnie noteikumi'))
             )
           ),
           e('div', { className: 'col-lg-6' },
@@ -318,7 +347,12 @@
       e('div', { className: 'zole-contact-copy' },
         e(Kicker, { style: { color: 'var(--green-700)' } }, L.contactKicker),
         e('h3', null, L.formTitle || L.contactTitle),
-        e('p', null, L.formIntro || L.contactText)
+        e('p', null, L.formIntro || L.contactText),
+        e('div', { className: 'zole-contact-details' },
+          settings.contact_address ? e('div', null, e('strong', null, L.addressLabel || 'Adrese'), e('span', null, settings.contact_address)) : null,
+          settings.contact_phone ? e('div', null, e('strong', null, L.phoneLabel || 'Tālrunis'), e('a', { href: 'tel:' + String(settings.contact_phone).replace(/[^+0-9]/g,'') }, settings.contact_phone)) : null,
+          settings.contact_email ? e('div', null, e('strong', null, L.emailLabel || 'E-pasts'), e('a', { href: 'mailto:' + settings.contact_email }, settings.contact_email)) : null
+        )
       ),
       e('form', { className: 'zole-contact-form', onSubmit: onSubmit },
         e('input', { type:'text', name:'website', tabIndex:'-1', autoComplete:'off', className:'zole-hp-field', 'aria-hidden':'true' }),
