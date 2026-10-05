@@ -20,11 +20,14 @@
   const settings = data.settings || {};
   const sections = data.sections || [];
   const current = data.currentMonth || (new Date().getMonth() + 1);
+  const calendarYear = parseInt(data.calendarYear || new Date().getFullYear(), 10);
+  const calendarYears = Array.isArray(data.calendarYears) ? data.calendarYears : [calendarYear];
 
   function Btn(props){ return e('a', { className: 'zole-btn ' + (props.kind || 'zole-btn-gold'), href: props.href || '#' }, props.children); }
   function Kicker(props){ return e('div', { className: 'zole-kicker', style: props.style || null }, props.children); }
 
   function Hero(){
+    const heroCardStyle = settings.hero_image ? { '--zole-hero-custom-image': 'url("' + String(settings.hero_image).replace(/"/g,'%22') + '")' } : null;
     return e('section', { className: 'zole-hero' },
       e('div', { className: 'container' },
         e('div', { className: 'zole-hero-grid' },
@@ -35,14 +38,14 @@
             e('div', { className: 'zole-subline' }, settings.hero_subline || L.heroSubline),
             e('div', { className: 'zole-actions' },
               e(Btn, { href: urls.calendar }, L.calendarBtn, ' ', e('span', null, '→')),
-              e(Btn, { href: urls.rules, kind: 'zole-btn-ghost' }, L.rulesBtn)
+              e(Btn, { href: urls.fullRules || urls.rules, kind: 'zole-btn-ghost' }, L.rulesBtn)
             ),
             null
           ),
           e('div', { className: 'zole-hero-card' },
-            e('div', { className: 'zole-hero-card-inner' },
+            e('div', { className: 'zole-hero-card-inner' + (settings.hero_image ? ' has-custom-image' : ''), style: heroCardStyle },
               e('div', { className: 'zole-card-main' },
-                e('div', { className: 'zole-federation-logo-wrap' }, e('img', { className: 'zole-logo-big', src: data.logo, alt: L.kicker || 'Latvijas Zolītes federācija' })),
+                e('div', { className: 'zole-federation-logo-wrap' }, e('img', { className: 'zole-logo-big', src: data.logo, width: 536, height: 536, decoding: 'async', fetchPriority: 'high', alt: L.kicker || 'Latvijas Zolītes federācija' })),
                 e('div', { className: 'zole-card-symbol' }, '♛'),
                 e('h2', { className: 'h3 fw-bold mb-0' }, L.cardTitle),
                 e('p', { className: 'mb-0 text-muted' }, L.cardText),
@@ -66,7 +69,8 @@
       e('div', { className: 'container' },
         e('div', { className: 'zole-section-head-centered' },
           e(Kicker, { style: { color: 'var(--green-700)' } }, L.quickKicker),
-          e('h2', { className: 'zole-section-title' }, L.quickTitle)
+          e('h2', { className: 'zole-section-title' }, L.quickTitle),
+          L.quickText ? e('p', { className: 'zole-section-text' }, L.quickText) : null
         ),
         e('div', { className: 'zole-quick-grid' }, items.map(function(it, i){
           return e('a', { className: 'zole-card zole-quick-card', href: it[3], key: i },
@@ -81,10 +85,19 @@
 
   function EventCard(ev, idx){
     const links = Array.isArray(ev.links) ? ev.links : [];
-    return e('article', { className: 'zole-event', key: idx },
-      e('div', { className: 'zole-event-date', 'aria-label': (L.dayLabel || 'Day') + ' ' + (ev.day || '') }, ev.day || '—'),
+    const meta = [];
+    if (ev.time) meta.push({icon:'clock', label:(data.lang === 'en' ? 'Time' : 'Laiks'), value:ev.time});
+    if (ev.location) meta.push({icon:'location', label:(data.lang === 'en' ? 'Location' : 'Vieta'), value:ev.location});
+    if (ev.format) meta.push({icon:'format', label:(data.lang === 'en' ? 'Format' : 'Formats'), value:ev.format});
+    if (ev.contact) meta.push({icon:'contact', label:(data.lang === 'en' ? 'Contact' : 'Kontakti'), value:ev.contact});
+    return e('article', { className: 'zole-event', key: ev.id || idx },
+      e('div', { className: 'zole-event-date', 'aria-label': (L.dayLabel || 'Day') + ' ' + (ev.day || '') }, ev.day || '-'),
       e('div', { className: 'zole-event-copy' },
-        e('p', null, ev.title),
+        ev.title ? e('h4', { className:'zole-event-title' }, ev.title) : null,
+        ev.description ? e('p', { className:'zole-event-description' }, ev.description) : null,
+        meta.length ? e('div', { className:'zole-event-meta' }, meta.map(function(item,i){
+          return e('span', { className:'zole-event-meta-item zole-event-meta-' + item.icon, key:item.icon+i }, e('strong', null, item.label + ':'), ' ', item.value);
+        })) : null,
         links.length ? e('div', { className: 'zole-event-links' }, links.slice(0,2).map(function(link, i){
           return e('a', { key: (link.url || '') + i, href: link.url, target: '_blank', rel: 'noopener noreferrer' }, link.label || L.documentLabel || 'Dokuments');
         })) : null
@@ -101,7 +114,18 @@
             e('h2', { className: 'zole-section-title' }, L.calendarTitle),
             e('p', { className: 'zole-section-text' }, L.calendarText)
           ),
-          e('div', { className: 'col-lg-4 text-lg-end' }, e(Btn, { href: urls.fullCalendar, kind: 'zole-btn-green' }, L.fullCalendar))
+          e('div', { className: 'col-lg-4 text-lg-end' },
+            e('div', { className:'zole-calendar-head-actions' },
+              calendarYears.length > 1 ? e('label', { className:'zole-year-picker' },
+                e('span', null, L.yearLabel || (data.lang === 'en' ? 'Year' : 'Gads')),
+                e('select', { value:String(calendarYear), onChange:function(ev){
+                  try { var u=new URL(window.location.href); u.searchParams.set('year',ev.target.value); u.searchParams.delete('month'); u.hash='calendar'; window.location.href=u.toString(); }
+                  catch(err){ window.location.href='?year='+encodeURIComponent(ev.target.value)+'#calendar'; }
+                } }, calendarYears.map(function(y){ return e('option',{key:y,value:String(y)},String(y)); }))
+              ) : e('span', { className:'zole-calendar-year-label' }, String(calendarYear)),
+              e(Btn, { href: urls.fullCalendar, kind: 'zole-btn-green' }, L.fullCalendar)
+            )
+          )
         ),
         e('div', { className: 'zole-calendar-desktop' },
           e('div', { className: 'zole-month-tabs', role: 'tablist', 'aria-label': L.monthTabs || 'Months' }, months.map(function(m, i){
@@ -206,7 +230,7 @@
         ),
         e('div', { className: 'zole-blog-grid' }, posts.map(function(item, i){
           return e('article', { key: item.id || item.url || i, className: 'zole-blog-card', tabIndex: 0, role: 'button', onClick: function(){ open(item); }, onKeyDown: function(ev){ if(ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); open(item); } } },
-            e('div', { className: 'zole-blog-image' }, e('img', { src: item.image, alt: item.title, loading: i ? 'lazy' : 'eager' })),
+            e('div', { className: 'zole-blog-image' }, e('img', { src: item.image, alt: item.imageAlt || item.title, width: 1280, height: 720, loading: i ? 'lazy' : 'eager', decoding: 'async', fetchPriority: i ? 'auto' : 'high' })),
             e('div', { className: 'zole-blog-body' },
               e('span', { className: 'zole-news-date' }, item.date),
               e('h3', null, item.title),
@@ -219,7 +243,7 @@
           e('button', { className: 'zole-blog-lightbox-backdrop', type: 'button', onClick: close, 'aria-label': L.blogClose || L.galleryClose || 'Close' }),
           e('div', { className: 'zole-blog-lightbox-inner' },
             e('button', { className: 'zole-blog-lightbox-close', type: 'button', onClick: close, 'aria-label': L.blogClose || 'Close' }, '×'),
-            e('div', { className: 'zole-blog-lightbox-media' }, e('img', { src: active.image, alt: active.title })),
+            e('div', { className: 'zole-blog-lightbox-media' }, e('img', { src: active.image, alt: active.imageAlt || active.title, width: 1280, height: 720, decoding: 'async' })),
             e('div', { className: 'zole-blog-lightbox-content' },
               e('span', { className: 'zole-news-date' }, active.date),
               e('h3', { id: 'zoleBlogLightboxTitle' }, active.title),
@@ -385,7 +409,7 @@
       e('div', { className:'container' },
         e('div', { className:'zole-partner-strip' },
           e('a', { className:'zole-partner-banner', href:urls.partner || 'https://goo.gl/g7jJpm', target:'_blank', rel:'noopener' },
-            e('img', { src:data.partnerBanner, alt:L.partnerTitle || 'Partner', loading:'lazy' }),
+            e('img', { src:data.partnerBanner, alt:L.partnerTitle || 'Partner', width:250, height:208, loading:'lazy', decoding:'async' }),
             e('span', { className:'zole-partner-copy' },
               e(Kicker, null, L.partnerKicker || 'Partner'),
               e('strong', null, L.partnerTitle || 'Uzspēlē Zoli'),
@@ -450,6 +474,7 @@
     let blogInserted = false;
     sections.forEach(function(sec){
       if (!sec || !sec.id) return;
+      if (sec.id === 'calendar') return;
       if (sec.id === 'contact' && !blogInserted) { children.push(e(BlogSection, { key: 'news' })); children.push(e(PartnerAndInfo, { key: 'partner-info' })); blogInserted = true; }
       const isGallery = sec.id === 'gallery';
       const isContact = sec.id === 'contact';
@@ -488,6 +513,9 @@
     );
   }
 
-  function App(){ return e('main', null, e(Hero), e(QuickLinks), e('div', { className: 'zole-latvian-band' }), e(DynamicSections)); }
+  function App(){
+    const showCalendar = !sections.length || sections.some(function(sec){ return sec && sec.id === 'calendar'; });
+    return e('main', null, e(Hero), e(QuickLinks), e('div', { className: 'zole-latvian-band' }), showCalendar ? e(Calendar) : null, e(DynamicSections));
+  }
   render(e(App), root);
 })();

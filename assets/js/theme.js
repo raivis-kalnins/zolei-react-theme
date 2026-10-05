@@ -152,30 +152,60 @@
 (function(){
   function ready(fn){ if(document.readyState !== 'loading') fn(); else document.addEventListener('DOMContentLoaded', fn); }
   var hcaptchaLoading=false;
-  function loadHCaptcha(callback){
-    if(window.hcaptcha && typeof window.hcaptcha.render === 'function'){ callback(); return; }
+  var hcaptchaReady=false;
+  var hcaptchaCallbacks=[];
+
+  window.zoleiHCaptchaReady=function(){
+    hcaptchaReady=true;
+    hcaptchaLoading=false;
+    var callbacks=hcaptchaCallbacks.slice();
+    hcaptchaCallbacks=[];
+    callbacks.forEach(function(fn){ try{ fn(); }catch(e){} });
+  };
+
+  function whenHCaptchaReady(callback){
+    if(hcaptchaReady && window.hcaptcha && typeof window.hcaptcha.render === 'function'){ callback(); return; }
+    hcaptchaCallbacks.push(callback);
     var cfg=window.zoleiForm||{};
     if(!cfg.hcaptchaSiteKey) return;
     var existing=document.querySelector('script[src*="hcaptcha.com/1/api.js"]');
-    if(existing){ existing.addEventListener('load', callback, {once:true}); return; }
+    if(existing){
+      if(window.hcaptcha && typeof window.hcaptcha.render === 'function'){
+        window.setTimeout(window.zoleiHCaptchaReady,0);
+      } else {
+        existing.addEventListener('load',function(){ window.setTimeout(window.zoleiHCaptchaReady,0); },{once:true});
+      }
+      return;
+    }
     if(hcaptchaLoading) return;
     hcaptchaLoading=true;
     var s=document.createElement('script');
-    s.src=cfg.hcaptchaApiUrl || ('https://js.hcaptcha.com/1/api.js?render=explicit&hl=' + encodeURIComponent(cfg.lang||'lv'));
-    s.async=true; s.defer=true; s.onload=callback; document.head.appendChild(s);
+    var src=cfg.hcaptchaApiUrl || ('https://js.hcaptcha.com/1/api.js?render=explicit&onload=zoleiHCaptchaReady&hl=' + encodeURIComponent(cfg.lang||'lv'));
+    if(src.indexOf('onload=')===-1){ src += (src.indexOf('?')===-1?'?':'&') + 'onload=zoleiHCaptchaReady'; }
+    if(src.indexOf('render=')===-1){ src += '&render=explicit'; }
+    s.src=src;
+    s.async=true;
+    s.defer=true;
+    s.onerror=function(){ hcaptchaLoading=false; hcaptchaCallbacks=[]; };
+    document.head.appendChild(s);
   }
+
   function renderHCaptcha(ctx){
     ctx=ctx||document;
     var widgets=ctx.querySelectorAll ? ctx.querySelectorAll('.h-captcha[data-sitekey]:not([data-zole-hcaptcha-rendered])') : [];
     if(!widgets.length) return;
-    loadHCaptcha(function(){
+    whenHCaptchaReady(function(){
       if(!(window.hcaptcha && typeof window.hcaptcha.render === 'function')) return;
       widgets.forEach(function(w){
         if(w.dataset.zoleHcaptchaRendered === '1' || w.querySelector('iframe')) return;
-        try { window.hcaptcha.render(w, { sitekey:w.getAttribute('data-sitekey'), hl:w.getAttribute('data-hl') || (window.zoleiForm && zoleiForm.lang) || 'lv' }); w.dataset.zoleHcaptchaRendered='1'; } catch(e) {}
+        try {
+          window.hcaptcha.render(w, { sitekey:w.getAttribute('data-sitekey'), hl:w.getAttribute('data-hl') || (window.zoleiForm && zoleiForm.lang) || 'lv' });
+          w.dataset.zoleHcaptchaRendered='1';
+        } catch(e) {}
       });
     });
   }
+
   ready(function(){
     renderHCaptcha(document);
     var observer=new MutationObserver(function(mutations){ mutations.forEach(function(m){ m.addedNodes && m.addedNodes.forEach(function(n){ if(n.nodeType===1) renderHCaptcha(n); }); }); });
