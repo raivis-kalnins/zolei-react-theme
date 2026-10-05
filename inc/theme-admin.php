@@ -3,6 +3,8 @@ if (!defined('ABSPATH')) { exit; }
 
 function zolei_admin_menu() {
     add_theme_page(__('Zolei control panel','zolei-react'), __('Zolei control panel','zolei-react'), 'manage_options', 'zolei-settings', 'zolei_admin_page');
+    // Fast access next to the compact tournament manager; no raw zolei_pdf CPT screen is needed.
+    add_submenu_page('zolei-tournaments', __('PDF faili','zolei-react'), __('PDF faili','zolei-react'), 'manage_options', 'zolei-pdf-manager', 'zolei_admin_page');
 }
 add_action('admin_menu','zolei_admin_menu');
 
@@ -100,6 +102,34 @@ function zolei_admin_handle_pdf_upload() {
         'original_size'=>absint($compression['original_size'] ?? 0),
         'compressed_size'=>absint(($compression['compressed_size'] ?? 0) ?: @filesize($target)),
     ));
+}
+
+
+function zolei_admin_handle_pdf_batch_upload() {
+    if (empty($_FILES['zolei_pdf_files']) || !is_array($_FILES['zolei_pdf_files']) || empty($_FILES['zolei_pdf_files']['name']) || !is_array($_FILES['zolei_pdf_files']['name'])) {
+        return new WP_Error('no_files', __('No PDF files selected.','zolei-react'));
+    }
+    $files = $_FILES['zolei_pdf_files'];
+    $count = 0; $errors = array();
+    $original_single = isset($_FILES['zolei_pdf_file']) ? $_FILES['zolei_pdf_file'] : null;
+    foreach ($files['name'] as $i => $name) {
+        if (!$name) { continue; }
+        $_FILES['zolei_pdf_file'] = array(
+            'name' => $files['name'][$i] ?? '',
+            'type' => $files['type'][$i] ?? 'application/pdf',
+            'tmp_name' => $files['tmp_name'][$i] ?? '',
+            'error' => $files['error'][$i] ?? UPLOAD_ERR_NO_FILE,
+            'size' => $files['size'][$i] ?? 0,
+        );
+        // For bulk uploads the filename becomes the title automatically.
+        $_POST['zolei_upload_title'] = '';
+        $result = zolei_admin_handle_pdf_upload();
+        if (is_wp_error($result)) { $errors[] = sanitize_text_field($name) . ': ' . $result->get_error_message(); }
+        else { $count++; }
+    }
+    if ($original_single !== null) { $_FILES['zolei_pdf_file'] = $original_single; }
+    else { unset($_FILES['zolei_pdf_file']); }
+    return array('count'=>$count,'errors'=>$errors);
 }
 
 function zolei_admin_delete_pdf_record($post_id, $delete_file = false) {
@@ -217,6 +247,15 @@ function zolei_admin_page() {
         $result = zolei_admin_handle_pdf_upload();
         if (is_wp_error($result)) { $pdf_error = $result->get_error_message(); } else { $pdf_message = __('PDF uploaded, compressed if possible, and added to the selected directory.','zolei-react'); }
     }
+    if (isset($_POST['zolei_upload_pdf_batch_submit'])) {
+        check_admin_referer('zolei_pdf_batch_upload_action','zolei_pdf_batch_upload_nonce');
+        $result = zolei_admin_handle_pdf_batch_upload();
+        if (is_wp_error($result)) { $pdf_error = $result->get_error_message(); }
+        else {
+            $pdf_message = sprintf(__('Uploaded %d PDF files. They are available on the frontend immediately; no individual CPT creation is required.','zolei-react'), intval($result['count'] ?? 0));
+            if (!empty($result['errors'])) { $pdf_error = implode(' | ', array_slice($result['errors'],0,5)); }
+        }
+    }
     if (isset($_POST['zolei_delete_pdf_submit'])) {
         check_admin_referer('zolei_pdf_delete_action','zolei_pdf_delete_nonce');
         if (zolei_admin_delete_pdf_record(absint($_POST['zolei_delete_pdf_id'] ?? 0), !empty($_POST['zolei_delete_pdf_file']))) { $pdf_message = __('PDF record deleted.','zolei-react'); }
@@ -292,36 +331,44 @@ function zolei_admin_page() {
         <p><button type="submit" name="zolei_save_settings" class="button button-primary button-hero"><?php esc_html_e('Save settings','zolei-react'); ?></button></p>
       </form>
 
-      <div class="zole-admin-card">
-        <h2><?php esc_html_e('Directory-based PDF manager','zolei-react'); ?></h2>
-        <p><?php printf(esc_html__('%d old-site PDFs are packaged in the theme. Demo import copies them to the same wp-content/uploads directories and creates records automatically.','zolei-react'), intval($manifest_count)); ?></p>
-        <form method="post" style="margin:12px 0 22px;">
-          <?php wp_nonce_field('zolei_pdf_manifest_action','zolei_pdf_manifest_nonce'); ?>
-          <button type="submit" name="zolei_import_pdf_manifest" class="button button-secondary"><?php esc_html_e('Import / update all demo PDFs now','zolei-react'); ?></button>
-          <a class="button" href="<?php echo esc_url(admin_url('edit.php?post_type=zolei_pdf')); ?>"><?php esc_html_e('Open raw PDF records','zolei-react'); ?></a>
+      <div class="zole-admin-card" id="zole-pdf-manager">
+        <h2><?php esc_html_e('Ātra PDF pārvaldība — drag & drop','zolei-react'); ?></h2>
+        <p><?php esc_html_e('Nav jāveido atsevišķs zolei_pdf ieraksts katram failam. Izvēlies sadaļu, gadu/mēnesi un iemet vairākus PDF vienā reizē; tehniskie ieraksti tiek izveidoti automātiski fonā, lai esošais frontend paliktu savietojams.','zolei-react'); ?></p>
+        <form method="post" enctype="multipart/form-data" class="zole-pdf-batch-form">
+          <?php wp_nonce_field('zolei_pdf_batch_upload_action','zolei_pdf_batch_upload_nonce'); ?>
+          <div class="zole-pdf-batch-meta">
+            <label><strong><?php esc_html_e('Sadaļa','zolei-react'); ?></strong><select name="zolei_upload_pdf_type"><?php foreach($types as $type=>$label): ?><option value="<?php echo esc_attr($type); ?>"><?php echo esc_html($label); ?></option><?php endforeach; ?></select></label>
+            <label><strong><?php esc_html_e('Gads','zolei-react'); ?></strong><input type="number" name="zolei_upload_year" value="<?php echo esc_attr(date('Y')); ?>" min="2000" max="2100"></label>
+            <label><strong><?php esc_html_e('Mēnesis','zolei-react'); ?></strong><select name="zolei_upload_month"><option value=""><?php esc_html_e('Bez mēneša','zolei-react'); ?></option><?php foreach($months as $mkey=>$mlabel): ?><option value="<?php echo esc_attr($mkey); ?>"><?php echo esc_html($mlabel); ?></option><?php endforeach; ?></select></label>
+            <label><strong><?php esc_html_e('Apakšmape (neobligāti)','zolei-react'); ?></strong><input class="code" name="zolei_upload_subdir" placeholder="2026-GADS"></label>
+          </div>
+          <label class="zole-pdf-dropzone" id="zole-pdf-dropzone">
+            <input type="file" name="zolei_pdf_files[]" accept="application/pdf,.pdf" multiple required class="zole-pdf-drop-input">
+            <span class="dashicons dashicons-upload"></span>
+            <strong><?php esc_html_e('Ievelc PDF failus šeit','zolei-react'); ?></strong>
+            <em><?php esc_html_e('vai klikšķini, lai izvēlētos vairākus failus','zolei-react'); ?></em>
+            <small id="zole-pdf-selected-count"><?php esc_html_e('Nav izvēlētu failu','zolei-react'); ?></small>
+          </label>
+          <button type="submit" name="zolei_upload_pdf_batch_submit" class="button button-primary button-hero"><?php esc_html_e('Augšupielādēt visus PDF','zolei-react'); ?></button>
         </form>
+
+        <form method="post" style="margin:18px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <?php wp_nonce_field('zolei_pdf_manifest_action','zolei_pdf_manifest_nonce'); ?>
+          <button type="submit" name="zolei_import_pdf_manifest" class="button button-secondary"><?php esc_html_e('Importēt / atjaunot vecās vietnes PDF pakotni','zolei-react'); ?></button>
+          <span class="description"><?php printf(esc_html__('Pakotnē: %d PDF. CPT izvēlne ir paslēpta — ikdienā lieto šo pārvaldnieku.','zolei-react'), intval($manifest_count)); ?></span>
+        </form>
+
         <div class="zole-pdf-directory-grid">
           <?php foreach($types as $type=>$label): $rows=zolei_admin_pdf_rows($type); ?>
           <section class="zole-pdf-directory-card">
             <header><h3><?php echo esc_html($label); ?></h3><code>wp-content/uploads/<?php echo esc_html($dirs[$type] ?? ''); ?></code><span><?php echo esc_html(count($rows)); ?> PDFs</span></header>
-            <form method="post" enctype="multipart/form-data" class="zole-pdf-upload-line">
-              <?php wp_nonce_field('zolei_pdf_upload_action','zolei_pdf_upload_nonce'); ?>
-              <input type="hidden" name="zolei_upload_pdf_type" value="<?php echo esc_attr($type); ?>">
-              <input type="file" name="zolei_pdf_file" accept="application/pdf,.pdf" required>
-              <input name="zolei_upload_title" placeholder="<?php esc_attr_e('Title / filename','zolei-react'); ?>">
-              <input class="code" name="zolei_upload_subdir" placeholder="<?php esc_attr_e('Optional subdirectory, e.g. 2026-GADS','zolei-react'); ?>">
-              <input type="number" name="zolei_upload_year" value="<?php echo esc_attr(date('Y')); ?>" min="2000" max="2100">
-              <select name="zolei_upload_month"><option value=""><?php esc_html_e('No month','zolei-react'); ?></option><?php foreach($months as $mkey=>$mlabel): ?><option value="<?php echo esc_attr($mkey); ?>"><?php echo esc_html($mlabel); ?></option><?php endforeach; ?></select>
-              <button type="submit" name="zolei_upload_pdf_submit" class="button button-primary"><?php esc_html_e('Upload + compress','zolei-react'); ?></button>
-            </form>
-            <div class="zole-pdf-list">
-              <?php foreach(array_slice($rows,0,14) as $pdf): $url=get_post_meta($pdf->ID,'_zolei_pdf_url',true); $rel=get_post_meta($pdf->ID,'_zolei_pdf_relative_path',true); $year=get_post_meta($pdf->ID,'_zolei_pdf_year',true); ?>
+            <div class="zole-pdf-list zole-pdf-list-scroll">
+              <?php foreach($rows as $pdf): $url=get_post_meta($pdf->ID,'_zolei_pdf_url',true); $rel=get_post_meta($pdf->ID,'_zolei_pdf_relative_path',true); $year=get_post_meta($pdf->ID,'_zolei_pdf_year',true); $month=get_post_meta($pdf->ID,'_zolei_pdf_month',true); ?>
               <div class="zole-pdf-row">
-                <div><strong><?php echo esc_html(get_the_title($pdf)); ?></strong><small><?php echo esc_html($year); ?> · <code><?php echo esc_html($rel); ?></code></small></div>
-                <div class="zole-pdf-row-actions"><?php if($url): ?><a class="button button-small" href="<?php echo esc_url($url); ?>" target="_blank" rel="noopener">PDF</a><?php endif; ?><a class="button button-small" href="<?php echo esc_url(get_edit_post_link($pdf->ID)); ?>"><?php esc_html_e('Edit','zolei-react'); ?></a><form method="post" onsubmit="return confirm('<?php echo esc_js(__('Delete this PDF record?','zolei-react')); ?>');"><?php wp_nonce_field('zolei_pdf_delete_action','zolei_pdf_delete_nonce'); ?><input type="hidden" name="zolei_delete_pdf_id" value="<?php echo esc_attr($pdf->ID); ?>"><label><input type="checkbox" name="zolei_delete_pdf_file" value="1"> file</label><button class="button button-small" name="zolei_delete_pdf_submit" type="submit"><?php esc_html_e('Delete','zolei-react'); ?></button></form></div>
+                <div><strong><?php echo esc_html(get_the_title($pdf)); ?></strong><small><?php echo esc_html(trim(($year?:'').' '.($months[$month]??''))); ?><?php if($rel): ?> · <code><?php echo esc_html($rel); ?></code><?php endif; ?></small></div>
+                <div class="zole-pdf-row-actions"><?php if($url): ?><a class="button button-small" href="<?php echo esc_url($url); ?>" target="_blank" rel="noopener">PDF</a><?php endif; ?><form method="post" onsubmit="return confirm('<?php echo esc_js(__('Delete this PDF record?','zolei-react')); ?>');"><?php wp_nonce_field('zolei_pdf_delete_action','zolei_pdf_delete_nonce'); ?><input type="hidden" name="zolei_delete_pdf_id" value="<?php echo esc_attr($pdf->ID); ?>"><label><input type="checkbox" name="zolei_delete_pdf_file" value="1"> <?php esc_html_e('dzēst arī failu','zolei-react'); ?></label><button class="button button-small" name="zolei_delete_pdf_submit" type="submit"><?php esc_html_e('Dzēst','zolei-react'); ?></button></form></div>
               </div>
-              <?php endforeach; if(!$rows): ?><p class="description"><?php esc_html_e('No PDFs yet. Import demo PDFs or upload a file into this directory.','zolei-react'); ?></p><?php endif; ?>
-              <?php if(count($rows)>14): ?><p><a href="<?php echo esc_url(admin_url('edit.php?post_type=zolei_pdf&zolei_pdf_type='.$type)); ?>"><?php printf(esc_html__('View all %d files','zolei-react'), count($rows)); ?></a></p><?php endif; ?>
+              <?php endforeach; if(!$rows): ?><p class="description"><?php esc_html_e('Šajā sadaļā vēl nav PDF.','zolei-react'); ?></p><?php endif; ?>
             </div>
           </section>
           <?php endforeach; ?>
@@ -349,9 +396,10 @@ function zolei_admin_page() {
       .zole-admin-wrap{max-width:1320px}.zole-admin-card{background:#fff;border:1px solid #dcdcde;border-radius:16px;padding:22px;margin:20px 0;box-shadow:0 12px 28px rgba(0,0,0,.04)}
       .zole-admin-grid-2{display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));gap:16px}.zole-admin-grid-2 label{font-weight:600}.zole-admin-grid-2 input{display:block;margin-top:6px;width:100%}.zole-admin-grid-2 .description{display:block;margin-top:6px;font-weight:400}
       .zole-admin-section-table{display:grid;gap:12px}.zole-admin-section-row{display:grid;grid-template-columns:150px 230px 1fr 1fr;gap:12px;align-items:start;background:#f6f7f7;border:1px solid #e3e5e7;border-radius:12px;padding:12px}.zole-admin-section-row label{font-weight:600}.zole-admin-section-row input,.zole-admin-section-row textarea{width:100%;margin-top:5px}
-      .zole-pdf-directory-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px}.zole-pdf-directory-card{border:1px solid #e0e2e4;border-radius:14px;background:#fbfbfc;overflow:hidden}.zole-pdf-directory-card header{display:grid;gap:4px;background:#123d2b;color:#fff;padding:16px}.zole-pdf-directory-card header h3{color:#fff;margin:0}.zole-pdf-directory-card header code{color:#ffe8ad;background:rgba(255,255,255,.08);padding:3px 6px;border-radius:6px}.zole-pdf-directory-card header span{font-weight:700;color:#f7d777}
-      .zole-pdf-upload-line{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px;border-bottom:1px solid #e4e6e8}.zole-pdf-upload-line input,.zole-pdf-upload-line select{width:100%;max-width:none}.zole-pdf-upload-line button{justify-self:start}.zole-pdf-list{padding:8px 14px 14px}.zole-pdf-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eceef0;padding:10px 0}.zole-pdf-row:last-child{border-bottom:0}.zole-pdf-row small{display:block;color:#646970;margin-top:3px}.zole-pdf-row-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.zole-pdf-row-actions form{display:flex;gap:6px;align-items:center;margin:0}.zole-gallery-admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}.zole-gallery-upload-box{display:grid;gap:12px;border:1px solid #e0e2e4;background:#fbfbfc;border-radius:14px;padding:16px}.zole-gallery-upload-box input[type=file]{display:block;margin-top:8px}
-      @media(max-width:900px){.zole-admin-grid-2,.zole-admin-section-row,.zole-pdf-upload-line{grid-template-columns:1fr}.zole-pdf-row{display:block}.zole-pdf-row-actions{margin-top:8px}}
+      .zole-pdf-batch-form{display:grid;gap:14px;background:#f8faf9;border:1px solid #dfe5e1;border-radius:14px;padding:16px}.zole-pdf-batch-meta{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px}.zole-pdf-batch-meta label{display:grid;gap:5px}.zole-pdf-batch-meta input,.zole-pdf-batch-meta select{width:100%;max-width:none}.zole-pdf-dropzone{position:relative;min-height:150px;border:2px dashed #6b8f7b;border-radius:14px;background:#fff;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;text-align:center;cursor:pointer;transition:.15s}.zole-pdf-dropzone.is-dragging{border-color:#2271b1;background:#f0f7fc}.zole-pdf-dropzone .dashicons{font-size:34px;width:34px;height:34px}.zole-pdf-dropzone em{font-style:normal;color:#646970}.zole-pdf-dropzone small{font-weight:700;color:#1d5d42}.zole-pdf-drop-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.zole-pdf-directory-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px}.zole-pdf-directory-card{border:1px solid #e0e2e4;border-radius:14px;background:#fbfbfc;overflow:hidden}.zole-pdf-directory-card header{display:grid;gap:4px;background:#123d2b;color:#fff;padding:16px}.zole-pdf-directory-card header h3{color:#fff;margin:0}.zole-pdf-directory-card header code{color:#ffe8ad;background:rgba(255,255,255,.08);padding:3px 6px;border-radius:6px}.zole-pdf-directory-card header span{font-weight:700;color:#f7d777}
+      .zole-pdf-upload-line{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px;border-bottom:1px solid #e4e6e8}.zole-pdf-upload-line input,.zole-pdf-upload-line select{width:100%;max-width:none}.zole-pdf-upload-line button{justify-self:start}.zole-pdf-list{padding:8px 14px 14px}.zole-pdf-list-scroll{max-height:440px;overflow:auto}.zole-pdf-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eceef0;padding:10px 0}.zole-pdf-row:last-child{border-bottom:0}.zole-pdf-row small{display:block;color:#646970;margin-top:3px}.zole-pdf-row-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.zole-pdf-row-actions form{display:flex;gap:6px;align-items:center;margin:0}.zole-gallery-admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}.zole-gallery-upload-box{display:grid;gap:12px;border:1px solid #e0e2e4;background:#fbfbfc;border-radius:14px;padding:16px}.zole-gallery-upload-box input[type=file]{display:block;margin-top:8px}
+      @media(max-width:900px){.zole-admin-grid-2,.zole-admin-section-row,.zole-pdf-upload-line,.zole-pdf-batch-meta{grid-template-columns:1fr}.zole-pdf-row{display:block}.zole-pdf-row-actions{margin-top:8px}}
     </style>
+    <script>jQuery(function($){var $i=$('.zole-pdf-drop-input'),$z=$('#zole-pdf-dropzone'),$c=$('#zole-pdf-selected-count');$i.on('change',function(){var n=this.files?this.files.length:0;$c.text(n?n+' PDF izvēlēti':'Nav izvēlētu failu');});$z.on('dragenter dragover',function(){$z.addClass('is-dragging');}).on('dragleave drop',function(){$z.removeClass('is-dragging');});<?php if (isset($_GET['page']) && $_GET['page']==='zolei-pdf-manager'): ?>setTimeout(function(){var el=document.getElementById('zole-pdf-manager');if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}},80);<?php endif; ?>});</script>
     <?php
 }

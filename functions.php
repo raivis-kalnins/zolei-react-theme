@@ -1,7 +1,7 @@
 <?php
 if (!defined('ABSPATH')) { exit; }
 
-define('ZOLEI_THEME_VERSION', '3.1.1');
+define('ZOLEI_THEME_VERSION', '3.3.0');
 
 function zolei_setup() {
     load_theme_textdomain('zolei-react', get_template_directory() . '/languages');
@@ -44,6 +44,29 @@ function zolei_scripts() {
     }
 }
 add_action('wp_enqueue_scripts','zolei_scripts');
+
+add_filter('upload_mimes', function($mimes) {
+    $mimes['avif'] = 'image/avif';
+    return $mimes;
+});
+
+add_filter('wp_resource_hints', function($urls, $relation_type) {
+    if ($relation_type === 'preconnect') {
+        $urls[] = array('href'=>'https://fonts.gstatic.com', 'crossorigin'=>'anonymous');
+        $urls[] = 'https://fonts.googleapis.com';
+        $urls[] = 'https://cdn.jsdelivr.net';
+    }
+    return $urls;
+}, 10, 2);
+
+function zolei_preload_home_assets() {
+    if (!is_front_page()) { return; }
+    $hero = zolei_asset_image_url('hero-top-reference.jpg');
+    $logo = zolei_asset_image_url('zole-logo.jpg');
+    if ($hero) { echo '<link rel="preload" as="image" href="' . esc_url($hero) . '" type="image/avif" fetchpriority="high">' . "\n"; }
+    if ($logo) { echo '<link rel="preload" as="image" href="' . esc_url($logo) . '" type="image/avif">' . "\n"; }
+}
+add_action('wp_head', 'zolei_preload_home_assets', 2);
 
 function zolei_lang_is_en() { return function_exists('pll_current_language') && pll_current_language('slug') === 'en'; }
 function zolei_lang() { return function_exists('pll_current_language') ? pll_current_language('slug') : 'lv'; }
@@ -98,7 +121,7 @@ function zolei_hcaptcha_enabled() { $cfg = zolei_hcaptcha_config(); return !empt
 function zolei_hcaptcha_source() { $cfg = zolei_hcaptcha_config(); return $cfg['source']; }
 function zolei_hcaptcha_api_url() {
     if (!zolei_hcaptcha_enabled()) { return ''; }
-    return add_query_arg(array('render'=>'explicit','hl'=>zolei_lang_is_en() ? 'en' : 'lv'), 'https://js.hcaptcha.com/1/api.js');
+    return add_query_arg(array('render'=>'explicit','onload'=>'zoleiHCaptchaReady','hl'=>zolei_lang_is_en() ? 'en' : 'lv'), 'https://js.hcaptcha.com/1/api.js');
 }
 function zolei_verify_hcaptcha($token) {
     $secret = zolei_hcaptcha_secret_key();
@@ -197,7 +220,7 @@ function zolei_brand() {
     $name = get_bloginfo('name');
     if (!$name || strtolower(trim($name)) === 'my blog') { $name = 'Zolei.lv'; }
     echo '<a class="zole-brand" href="'.esc_url(home_url('/')).'" rel="home">';
-    if (has_custom_logo()) { the_custom_logo(); } else { echo '<img src="'.esc_url(get_template_directory_uri().'/assets/images/zole-logo.jpg').'" alt="'.esc_attr($name).'">'; }
+    if (has_custom_logo()) { the_custom_logo(); } else { echo '<img src="'.esc_url(zolei_asset_image_url('zole-logo.jpg')).'" width="536" height="536" decoding="async" fetchpriority="high" alt="'.esc_attr($name).'">'; }
     echo '<span class="zole-brand-copy"><strong class="zole-brand-title">'.esc_html($name).'</strong><span class="zole-brand-tag">'.esc_html(zolei_i18n('Latvijas Zolītes federācija','Latvian Zolīte Federation')).'</span></span></a>';
 }
 function zolei_nav_menu() {
@@ -215,9 +238,35 @@ function zolei_menu_fallback() { ?>
 <?php }
 
 
-function zolei_asset_image_url($file) {
-    $file = ltrim((string) $file, '/');
-    return get_template_directory_uri() . '/assets/images/' . $file;
+function zolei_asset_image_url($file, $prefer_avif = true) {
+    $file = basename(ltrim((string) $file, '/'));
+    if ($file === '') { return ''; }
+    if ($prefer_avif && preg_match('~\.(jpe?g|png|webp|gif)$~i', $file)) {
+        $avif_file = preg_replace('~\.(jpe?g|png|webp|gif)$~i', '.avif', $file);
+        if ($avif_file && file_exists(get_template_directory() . '/assets/images/' . $avif_file)) {
+            $file = $avif_file;
+        }
+    }
+    return get_template_directory_uri() . '/assets/images/' . rawurlencode($file);
+}
+
+/**
+ * Repair theme image URLs saved in post meta when the theme directory name changes.
+ * Example: /themes/zolei-react-theme/... -> /themes/zolei-react-theme-master/...
+ */
+function zolei_repair_theme_image_url($url) {
+    $url = trim((string) $url);
+    if ($url === '') { return ''; }
+    $path = (string) wp_parse_url($url, PHP_URL_PATH);
+    if (preg_match('~/assets/images/([^/]+)$~i', $path, $m)) {
+        $file = rawurldecode($m[1]);
+        $candidate = get_template_directory() . '/assets/images/' . basename($file);
+        $avif_candidate = preg_replace('~\.(jpe?g|png|webp|gif)$~i', '.avif', $candidate);
+        if (file_exists($candidate) || ($avif_candidate && file_exists($avif_candidate))) {
+            return zolei_asset_image_url($file, true);
+        }
+    }
+    return zolei_prefer_avif_url($url);
 }
 
 function zolei_prefer_avif_url($url) {
@@ -252,6 +301,7 @@ function zolei_image_to_avif($source_path, $max_width = 1800, $quality = 78) {
     if (is_wp_error($editor)) { return false; }
     $size = $editor->get_size();
     if (!empty($size['width']) && intval($size['width']) > $max_width) { $editor->resize($max_width, null, false); }
+    if (method_exists($editor, 'set_quality')) { $editor->set_quality(max(40, min(95, intval($quality)))); }
     $saved = $editor->save($dest, 'image/avif');
     if (is_wp_error($saved) || !file_exists($dest)) { return false; }
     return $dest;
@@ -285,9 +335,54 @@ function zolei_make_gallery_versions($source_path, $base_name = '') {
 
 add_filter('wp_generate_attachment_metadata', function($metadata, $attachment_id) {
     $path = get_attached_file($attachment_id);
-    if ($path && preg_match('~\.(jpe?g|png|webp)$~i', $path)) { zolei_image_to_avif($path, 1920, 80); }
+    if (!$path || !preg_match('~\.(jpe?g|png|webp)$~i', $path)) { return $metadata; }
+
+    // Create an AVIF sidecar for the original and every WordPress-generated size.
+    zolei_image_to_avif($path, 2560, 80);
+    $dir = dirname($path);
+    if (!empty($metadata['sizes']) && is_array($metadata['sizes'])) {
+        foreach ($metadata['sizes'] as $size) {
+            if (empty($size['file'])) { continue; }
+            $size_path = trailingslashit($dir) . $size['file'];
+            if (file_exists($size_path)) { zolei_image_to_avif($size_path, 1920, 78); }
+        }
+    }
     return $metadata;
 }, 20, 2);
+
+// SEO/accessibility fallback: never leave meaningful attachment images without alt text.
+add_filter('wp_get_attachment_image_attributes', function($attr, $attachment) {
+    if (empty($attr['alt']) && is_object($attachment) && !empty($attachment->ID)) {
+        $alt = trim((string) get_post_meta($attachment->ID, '_wp_attachment_image_alt', true));
+        if ($alt === '') { $alt = trim((string) get_the_title($attachment->ID)); }
+        if ($alt !== '') { $attr['alt'] = $alt; }
+    }
+    if (empty($attr['decoding'])) { $attr['decoding'] = 'async'; }
+    return $attr;
+}, 20, 2);
+
+// Persistently repair stale image URLs created before the theme folder was renamed.
+function zolei_migrate_stale_blog_image_urls() {
+    if (get_option('zolei_image_url_migration_320_done')) { return; }
+    $ids = get_posts(array(
+        'post_type'=>'post',
+        'post_status'=>'any',
+        'fields'=>'ids',
+        'posts_per_page'=>-1,
+        'meta_key'=>'_zolei_blog_image',
+        'no_found_rows'=>true,
+    ));
+    foreach ($ids as $id) {
+        $old_url = (string) get_post_meta($id, '_zolei_blog_image', true);
+        if ($old_url === '') { continue; }
+        $new_url = zolei_repair_theme_image_url($old_url);
+        if ($new_url !== '' && $new_url !== $old_url) {
+            update_post_meta($id, '_zolei_blog_image', esc_url_raw($new_url));
+        }
+    }
+    update_option('zolei_image_url_migration_320_done', 1, false);
+}
+add_action('admin_init', 'zolei_migrate_stale_blog_image_urls', 25);
 
 function zolei_default_months() {
     $file = get_template_directory() . '/assets/data/zolei-calendar-current.json';
@@ -297,6 +392,9 @@ function zolei_default_months() {
 }
 function zolei_default_gallery() { return json_decode('["https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01973.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01948.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01931.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01906.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01899.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01892.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01885.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01880.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01879.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01869.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01848.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01842.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01821.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01815.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01805.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01799.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01797.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01790.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01767.JPG", "https://zolei.lv/wp-content/gallery/zolei_2024/thumbs/thumbs_DSC01762.JPG", "https://zolei.lv/wp-content/uploads/2014/01/DSC07147-500x375.jpg", "https://zolei.lv/wp-content/uploads/2014/01/DSC07148-500x375.jpg", "https://zolei.lv/wp-content/uploads/2014/01/DSC07149-500x375.jpg", "https://zolei.lv/wp-content/uploads/2014/01/DSC07151-500x375.jpg"]', true); }
 function zolei_calendar_months() {
+    if (function_exists('zolei_has_dynamic_tournaments') && zolei_has_dynamic_tournaments() && function_exists('zolei_dynamic_calendar_months')) {
+        return zolei_dynamic_calendar_months();
+    }
     $months = get_option('zolei_calendar_months');
     return (is_array($months) && !empty($months)) ? $months : zolei_default_months();
 }
@@ -347,13 +445,19 @@ function zolei_gallery_images() {
 }
 
 function zolei_settings() {
-    return array(
+    $hero_subline = get_option('zolei_hero_subline', zolei_i18n('Mārupe. Labvēlīgam lidojumam teicama starta vieta','Mārupe — a good starting place for a favourable flight'));
+    $home_content = get_option('zolei_home_content_overrides', array());
+    $home_lang = zolei_lang_is_en() ? 'en' : 'lv';
+    if (is_array($home_content) && !empty($home_content[$home_lang]['heroSubline'])) { $hero_subline = $home_content[$home_lang]['heroSubline']; }
+    $settings = array(
         'contact_email' => get_option('zolei_contact_email','info@zolei.lv'),
         'contact_phone' => get_option('zolei_contact_phone',''),
         'contact_address' => get_option('zolei_contact_address','Daugavas ielā 1C, Mārupes novads, Mārupe, Rīgas rajons, LV-2167'),
-        'hero_subline' => get_option('zolei_hero_subline', zolei_i18n('Mārupe. Labvēlīgam lidojumam teicama starta vieta','Mārupe — a good starting place for a favourable flight')),
+        'hero_subline' => $hero_subline,
         'hcaptchaSiteKey' => zolei_hcaptcha_site_key(),
     );
+    if (function_exists('zolei_home_media_settings')) { $settings = array_merge($settings, zolei_home_media_settings()); }
+    return $settings;
 }
 
 function zolei_home_news($limit = 3) {
@@ -368,8 +472,8 @@ function zolei_home_news($limit = 3) {
         $custom_image = esc_url_raw(get_post_meta($id, '_zolei_blog_image', true));
         $news_fallbacks = array(zolei_asset_image_url('news-zolei-home.jpg'), zolei_asset_image_url('news-results-ratings.jpg'), zolei_asset_image_url('news-tournament-submit.jpg'));
         $fallback = $news_fallbacks[$i % count($news_fallbacks)];
-        $image = get_the_post_thumbnail_url($id, 'large') ?: ($custom_image ?: $fallback);
-        $image = zolei_prefer_avif_url($image);
+        $featured = get_the_post_thumbnail_url($id, 'large');
+        $image = $featured ? zolei_prefer_avif_url($featured) : ($custom_image ? zolei_repair_theme_image_url($custom_image) : $fallback);
         $raw_content = get_the_content(null, false, $id);
         $plain = trim(wp_strip_all_tags(strip_shortcodes($raw_content)));
         $items[] = array(
@@ -379,7 +483,8 @@ function zolei_home_news($limit = 3) {
             'date' => get_the_date('d.m.Y', $id),
             'excerpt' => wp_trim_words(get_the_excerpt($id) ?: $plain, 24),
             'content' => wpautop(wp_kses_post($raw_content ?: get_the_excerpt($id))),
-            'image' => $image ?: get_template_directory_uri().'/assets/images/zole-logo.jpg',
+            'image' => $image ?: zolei_asset_image_url('zole-logo.jpg'),
+            'imageAlt' => $title,
         );
         $i++;
     }
@@ -443,16 +548,22 @@ function zolei_get_one_page_sections() {
             if (get_post_meta($id,'_zolei_section_active',true)==='0') { continue; }
             $key = sanitize_title(get_post_meta($id,'_zolei_section_key',true) ?: get_post_field('post_name',$id));
             $shortcode = get_post_meta($id,'_zolei_section_shortcode',true);
-            $html = apply_filters('the_content', get_the_content(null,false,$id));
-            if ($shortcode) { $html .= do_shortcode($shortcode); }
+            $html = '';
+            if ($key !== 'calendar') {
+                $html = apply_filters('the_content', get_the_content(null,false,$id));
+                if ($shortcode) { $html .= do_shortcode($shortcode); }
+            }
             $items[] = array('id'=>$key,'title'=>zolei_section_label($key,'title',get_the_title()),'nav'=>zolei_section_label($key,'nav',get_post_meta($id,'_zolei_section_nav_label',true) ?: get_the_title()),'html'=>zolei_translate_default_section_html($key,$html),'pdfType'=>get_post_meta($id,'_zolei_section_pdf_type',true));
         }
         wp_reset_postdata();
     }
     if (!$items) {
         foreach(zolei_default_one_page_sections() as $sec){
-            $html = apply_filters('the_content', $sec['content']);
-            if (!empty($sec['shortcode'])) { $html .= do_shortcode($sec['shortcode']); }
+            $html = '';
+            if ($sec['key'] !== 'calendar') {
+                $html = apply_filters('the_content', $sec['content']);
+                if (!empty($sec['shortcode'])) { $html .= do_shortcode($sec['shortcode']); }
+            }
             $items[] = array('id'=>$sec['key'],'title'=>zolei_section_label($sec['key'],'title',$sec['title']),'nav'=>zolei_section_label($sec['key'],'nav',$sec['nav']),'html'=>zolei_translate_default_section_html($sec['key'],$html),'pdfType'=>$sec['pdf_type']);
         }
     }
@@ -462,12 +573,17 @@ function zolei_get_one_page_sections() {
 
 function zolei_requested_month_number($months) {
     $current = intval(current_time('n'));
-    if (empty($_GET['month'])) { return $current; }
+    $year = function_exists('zolei_calendar_year') ? zolei_calendar_year() : intval(current_time('Y'));
+    if (empty($_GET['month'])) {
+        if ($year === intval(current_time('Y'))) { return $current; }
+        foreach ((array)$months as $i=>$month) { if (!empty($month['events'])) { return $i + 1; } }
+        return 1;
+    }
     $wanted = sanitize_title(wp_unslash($_GET['month']));
     foreach ((array) $months as $i => $month) {
         if (($month['slug'] ?? '') === $wanted) { return $i + 1; }
     }
-    return $current;
+    return ($year === intval(current_time('Y'))) ? $current : 1;
 }
 
 function zolei_redirect_legacy_month_pages() {
@@ -493,29 +609,57 @@ add_action('template_redirect', 'zolei_redirect_legacy_month_pages', 2);
 
 function zolei_home_payload() {
     $is_en = zolei_lang_is_en();
+    $calendar_year = function_exists('zolei_calendar_year') ? zolei_calendar_year() : intval(current_time('Y'));
     $months = zolei_calendar_months();
     foreach ($months as $i => $m) {
         $months[$i]['name'] = $is_en ? ($m['en'] ?? $m['lv']) : ($m['lv'] ?? $m['en']);
-        $months[$i]['url'] = home_url('/?month=' . rawurlencode($m['slug'] ?? '') . '#calendar');
+        $month_args = array('month'=>($m['slug'] ?? ''));
+        if ($calendar_year) { $month_args['year'] = $calendar_year; }
+        $months[$i]['url'] = add_query_arg($month_args, home_url('/')) . '#calendar';
     }
     $t = $is_en ? array(
-        'kicker'=>'Latvian Zolīte Federation','heroTitle'=>'Zolīte with character.','heroText'=>'Tournament calendar, rules, results and ratings in one elegant, easy-to-use place for players and organisers.','heroSubline'=>'Mārupe — a good starting place for a favourable flight','calendarBtn'=>'View calendar','rulesBtn'=>'Classic rules','fullRulesBtn'=>'Full rules','monthTabs'=>'month tabs','eventsPreview'=>'events in calendar','twoLang'=>'two languages','cardTitle'=>'The next table is waiting','cardText'=>'Find the next tournament, format, location and contact details.','openCalendar'=>'Open calendar','quickKicker'=>'Main sections','quickTitle'=>'A clear route for every player.','quickText'=>'The homepage shows the essential routes first: where to play, how the game works, where to check results and how to contact organisers.','navCalendar'=>'Calendar','navCalendarText'=>'A clear 12-month calendar; the current month opens automatically and mobile users can expand any month.','navRules'=>'Rules','navRulesText'=>'Classic Zolīte basics and the full rule page.','navResults'=>'Results','navResultsText'=>'PDF results, regulations, ratings and archive.','navContact'=>'Contact','navContactText'=>'Address, email and tournament submission call-to-action.','calendarKicker'=>'Tournament calendar','calendarTitle'=>'12 months, easy to browse.','calendarText'=>'Browse every month quickly. The current month opens automatically; on mobile each month is a large, readable expandable section.','fullCalendar'=>'Full calendar','monthSource'=>'Events imported from the current Zolei.lv month pages.','monthPage'=>'Month page','rulesKicker'=>'Classic Zolīte','rulesTitle'=>'Rules without confusion.','rulesText'=>'A short rules block helps new players understand the game quickly and gives experienced players an easy reference.','rule1'=>'The game uses 26 cards.','rule2'=>'Trumps: queens, jacks and then diamonds.','rule3'=>'The declarer needs at least 61 points.','rule4'=>'Strategy, memory and calm play win.','newsKicker'=>'News','newsTitle'=>'Important notices stay visible.','newsText'=>'Championship stages, calendar changes, ethics code and board information should be easy to find.','notice1Title'=>'Championship stages','notice1Text'=>'Use clear cards for updates and link them to full information pages.','notice2Title'=>'Ethics code','notice2Text'=>'Fair play, respectful behaviour and clear tournament principles.','galleryKicker'=>'Photo gallery','galleryTitle'=>'Moments from Latvian Zolīte tables.','galleryText'=>'A homepage gallery slider and expandable photo wall use existing Zolei.lv gallery images, bringing the atmosphere of Latvian tournament tables into the new site.','gallerySlideTitle'=>'Tournament atmosphere','gallerySlideText'=>'Players, winners and moments from the Zolīte community.','contactKicker'=>'Contact','contactTitle'=>'Add a tournament or update information.','contactText'=>'Send date, location, start time, format and contact person so players can find everything in time.','addressLabel'=>'Address','phoneLabel'=>'Phone','emailLabel'=>'Email','newsSliderKicker'=>'News','newsSliderTitle'=>'Zolei.lv news and stories.','newsSliderText'=>'Three latest posts with images, short descriptions and a lightbox reading view.','blogLightboxHint'=>'Click a card to read the story','blogImageLabel'=>'Image','blogClose'=>'Close','shareFacebook'=>'Facebook','shareLinkedin'=>'LinkedIn','shareWhatsapp'=>'WhatsApp','shareX'=>'X','copyLink'=>'Copy link','copiedLink'=>'Copied','copyPrompt'=>'Copy link:','readMore'=>'Read more','allNews'=>'All news','contactBtn'=>'Contact us','galleryLoadMore'=>'Load more photos','galleryOpen'=>'Open photo','galleryClose'=>'Close','previous'=>'Previous','next'=>'Next','galleryCount'=>'photos from the live Zolei.lv gallery','formTitle'=>'Send information','formIntro'=>'Submit a tournament, correction or question. The same form works in English and Latvian.','formName'=>'Name','formEmail'=>'Email','formPhone'=>'Phone','formSubject'=>'Subject','formMessage'=>'Message','formSubmit'=>'Send message','formSuccess'=>'Thank you! Your message was sent.','formRequired'=>'Required field','partnerKicker'=>'Partner','partnerTitle'=>'Play Zolīte online','partnerText'=>'A partner link for players who want to practise and play outside tournaments too.','partnerButton'=>'Open partner page','infoKicker'=>'Information','infoTitle'=>'Board, ethics and regulations in one view.','infoText'=>'Important legacy website sections are available as quick modal windows, so visitors can stay on the homepage.','boardTitle'=>'Board and contacts','boardText'=>'Latvian Zolīte Federation board and contact information.','boardHtml'=>'<p><strong>Uldis Vītols:</strong> info@zolei.lv</p><p><strong>Elgars Sapats:</strong> info@zolei.lv, phone 22315099</p>','ethicsTitle'=>'Ethics code','ethicsText'=>'Fair play, respect for opponents and clear tournament behaviour.','ethicsHtml'=>'<p><strong>The Zolīte ethics code</strong> defines basic principles for player conduct.</p><ol><li>Play according to the rules.</li><li>Treat other players with respect.</li><li>Do not cheat or take unfair advantage of others.</li><li>Control yourself and respect tournament organisers.</li><li>Resolve disputes calmly and correctly.</li></ol>','regulationsTitle'=>'Regulations','regulationsText'=>'Tournament regulations and game documents in the PDF section.','regulationsHtml'=>'<p>The regulations section stores tournament rules, posters and competition-related PDF documents.</p><p>PDF files remain the same for Latvian and English; only titles and descriptions are translated.</p>','openModal'=>'Open','closeModal'=>'Close','archiveSidebarTitle'=>'Archive section','archiveSidebarText'=>'The archive keeps historic tournament results, cups, ratings and other documents from the existing Zolei.lv website. Search by year or title while the folder structure stays like the old wp-content/uploads/arhivs directory.','archiveSidebarPoint1'=>'Old folders and PDF paths are preserved.','archiveSidebarPoint2'=>'Search by year, tournament or file name.','archiveSidebarPoint3'=>'New archive PDFs can be added in the admin PDF manager.','formHcaptchaMissing'=>'Configure hCaptcha site key in admin settings.'
+        'kicker'=>'Latvian Zolīte Federation','heroTitle'=>'Zolīte with character.','heroText'=>'Tournament calendar, rules, results and ratings in one elegant, easy-to-use place for players and organisers.','heroSubline'=>'Mārupe — a good starting place for a favourable flight','calendarBtn'=>'View calendar','rulesBtn'=>'Classic rules','fullRulesBtn'=>'Full rules','monthTabs'=>'month tabs','eventsPreview'=>'events in calendar','twoLang'=>'two languages','cardTitle'=>'The next table is waiting','cardText'=>'Find the next tournament, format, location and contact details.','openCalendar'=>'Open calendar','quickKicker'=>'Main sections','quickTitle'=>'A clear route for every player.','quickText'=>'The homepage shows the essential routes first: where to play, how the game works, where to check results and how to contact organisers.','navCalendar'=>'Calendar','navCalendarText'=>'A clear 12-month calendar; the current month opens automatically and mobile users can expand any month.','navRules'=>'Rules','navRulesText'=>'Classic Zolīte basics and the full rule page.','navResults'=>'Results','navResultsText'=>'PDF results, regulations, ratings and archive.','navContact'=>'Contact','navContactText'=>'Address, email and tournament submission call-to-action.','calendarKicker'=>'Tournament calendar','calendarTitle'=>'12 months, easy to browse.','calendarText'=>'Browse every month quickly. The current month opens automatically; on mobile each month is a large, readable expandable section.','fullCalendar'=>'Full calendar','monthSource'=>'Tournaments are managed dynamically in WordPress and grouped by date.','monthPage'=>'Month page','rulesKicker'=>'Classic Zolīte','rulesTitle'=>'Rules without confusion.','rulesText'=>'A short rules block helps new players understand the game quickly and gives experienced players an easy reference.','rule1'=>'The game uses 26 cards.','rule2'=>'Trumps: queens, jacks and then diamonds.','rule3'=>'The declarer needs at least 61 points.','rule4'=>'Strategy, memory and calm play win.','newsKicker'=>'News','newsTitle'=>'Important notices stay visible.','newsText'=>'Championship stages, calendar changes, ethics code and board information should be easy to find.','notice1Title'=>'Championship stages','notice1Text'=>'Use clear cards for updates and link them to full information pages.','notice2Title'=>'Ethics code','notice2Text'=>'Fair play, respectful behaviour and clear tournament principles.','galleryKicker'=>'Photo gallery','galleryTitle'=>'Moments from Latvian Zolīte tables.','galleryText'=>'A homepage gallery slider and expandable photo wall use existing Zolei.lv gallery images, bringing the atmosphere of Latvian tournament tables into the new site.','gallerySlideTitle'=>'Tournament atmosphere','gallerySlideText'=>'Players, winners and moments from the Zolīte community.','contactKicker'=>'Contact','contactTitle'=>'Add a tournament or update information.','contactText'=>'Send date, location, start time, format and contact person so players can find everything in time.','addressLabel'=>'Address','phoneLabel'=>'Phone','emailLabel'=>'Email','newsSliderKicker'=>'News','newsSliderTitle'=>'Zolei.lv news and stories.','newsSliderText'=>'Three latest posts with images, short descriptions and a lightbox reading view.','blogLightboxHint'=>'Click a card to read the story','blogImageLabel'=>'Image','blogClose'=>'Close','shareFacebook'=>'Facebook','shareLinkedin'=>'LinkedIn','shareWhatsapp'=>'WhatsApp','shareX'=>'X','copyLink'=>'Copy link','copiedLink'=>'Copied','copyPrompt'=>'Copy link:','readMore'=>'Read more','allNews'=>'All news','contactBtn'=>'Contact us','galleryLoadMore'=>'Load more photos','galleryOpen'=>'Open photo','galleryClose'=>'Close','previous'=>'Previous','next'=>'Next','galleryCount'=>'photos from the live Zolei.lv gallery','formTitle'=>'Send information','formIntro'=>'Submit a tournament, correction or question. The same form works in English and Latvian.','formName'=>'Name','formEmail'=>'Email','formPhone'=>'Phone','formSubject'=>'Subject','formMessage'=>'Message','formSubmit'=>'Send message','formSuccess'=>'Thank you! Your message was sent.','formRequired'=>'Required field','partnerKicker'=>'Partner','partnerTitle'=>'Play Zolīte online','partnerText'=>'A partner link for players who want to practise and play outside tournaments too.','partnerButton'=>'Open partner page','infoKicker'=>'Information','infoTitle'=>'Board, ethics and regulations in one view.','infoText'=>'Important legacy website sections are available as quick modal windows, so visitors can stay on the homepage.','boardTitle'=>'Board and contacts','boardText'=>'Latvian Zolīte Federation board and contact information.','boardHtml'=>'<p><strong>Uldis Vītols:</strong> info@zolei.lv</p><p><strong>Elgars Sapats:</strong> info@zolei.lv, phone 22315099</p>','ethicsTitle'=>'Ethics code','ethicsText'=>'Fair play, respect for opponents and clear tournament behaviour.','ethicsHtml'=>'<p><strong>The Zolīte ethics code</strong> defines basic principles for player conduct.</p><ol><li>Play according to the rules.</li><li>Treat other players with respect.</li><li>Do not cheat or take unfair advantage of others.</li><li>Control yourself and respect tournament organisers.</li><li>Resolve disputes calmly and correctly.</li></ol>','regulationsTitle'=>'Regulations','regulationsText'=>'Tournament regulations and game documents in the PDF section.','regulationsHtml'=>'<p>The regulations section stores tournament rules, posters and competition-related PDF documents.</p><p>PDF files remain the same for Latvian and English; only titles and descriptions are translated.</p>','openModal'=>'Open','closeModal'=>'Close','archiveSidebarTitle'=>'Archive section','archiveSidebarText'=>'The archive keeps historic tournament results, cups, ratings and other documents from the existing Zolei.lv website. Search by year or title while the folder structure stays like the old wp-content/uploads/arhivs directory.','archiveSidebarPoint1'=>'Old folders and PDF paths are preserved.','archiveSidebarPoint2'=>'Search by year, tournament or file name.','archiveSidebarPoint3'=>'New archive PDFs can be added in the admin PDF manager.','formHcaptchaMissing'=>'Configure hCaptcha site key in admin settings.'
     ) : array(
-        'kicker'=>'Latvijas Zolītes federācija','heroTitle'=>'Zolīte ar raksturu.','heroText'=>'Turnīru kalendārs, noteikumi, rezultāti un reitingi vienā elegantā, viegli lietojamā vietā spēlētājiem un organizatoriem.','heroSubline'=>'Mārupe. Labvēlīgam lidojumam teicama starta vieta','calendarBtn'=>'Skatīt turnīrus','rulesBtn'=>'Klasiskās zoles noteikumi','fullRulesBtn'=>'Pilnie noteikumi','monthTabs'=>'mēnešu tabs','eventsPreview'=>'notikumi kalendārā','twoLang'=>'divas valodas','cardTitle'=>'Nākamais galds gaida','cardText'=>'Atrodi tuvāko turnīru, formātu, vietu un kontaktinformāciju.','openCalendar'=>'Atvērt kalendāru','quickKicker'=>'Galvenās sadaļas','quickTitle'=>'Skaidrs ceļš katram spēlētājam.','quickText'=>'','navCalendar'=>'Turnīri','navCalendarText'=>'Pārskatāms 12 mēnešu kalendārs; aktuālais mēnesis atveras automātiski, mobilajā skatā katru mēnesi var ērti izvērst.','navRules'=>'Noteikumi','navRulesText'=>'Klasiskās zoles pamati un pilnā noteikumu lapa.','navResults'=>'Rezultāti','navResultsText'=>'PDF rezultāti, nolikumi, reitingi un arhīvs.','navContact'=>'Saziņa','navContactText'=>'Adrese, epasts un skaidrs turnīra pieteikšanas aicinājums.','calendarKicker'=>'Turnīru kalendārs','calendarTitle'=>'12 mēneši, viegli pārskatāmi.','calendarText'=>'Ātri apskati katru mēnesi. Aktuālais mēnesis atveras automātiski, bet mobilajā skatā katrs mēnesis ir liela, viegli salasāma izvēršama sadaļa.','fullCalendar'=>'Pilns kalendārs','monthSource'=>'Notikumi importēti no esošajām Zolei.lv mēnešu lapām.','monthPage'=>'Mēneša lapa','rulesKicker'=>'Klasiskā zole','rulesTitle'=>'Noteikumi bez sarežģījumiem.','rulesText'=>'Īsais noteikumu bloks palīdz jaunam spēlētājam ātri saprast spēles pamatu, bet pieredzējušam — pārbaudīt detaļas.','rule1'=>'Spēlē izmanto 26 kārtis.','rule2'=>'Trumpji: dāmas, kalpi, pēc tam kāravi.','rule3'=>'Lielajam vajag vismaz 61 aci.','rule4'=>'Uzvar stratēģija, atmiņa un mierīga spēle.','newsKicker'=>'Aktualitātes','newsTitle'=>'Svarīgi paziņojumi paliek redzami.','newsText'=>'Čempionātu posmi, kalendāra izmaiņas, ētikas kodekss un valdes informācija ir jāatrod ātri.','notice1Title'=>'Latvijas čempionāta posmi','notice1Text'=>'Aktualitāšu kartītes palīdz izcelt būtisko un aizvest uz pilnu informāciju.','notice2Title'=>'Ētikas kodekss','notice2Text'=>'Godīga spēle, cieņpilna uzvedība un skaidri turnīra principi.','galleryKicker'=>'Foto galerija','galleryTitle'=>'Spēles mirkļi no Latvijas zoles galdiem.','galleryText'=>'Sākumlapas galerijas slīdnis un paplašināmā foto siena izmanto esošās Zolei.lv galerijas bildes, lai jaunajā lapā ienestu Latvijas turnīru atmosfēru.','gallerySlideTitle'=>'Turnīru atmosfēra','gallerySlideText'=>'Spēlētāji, uzvarētāji un zoles kopienas mirkļi.','contactKicker'=>'Kontakti','contactTitle'=>'Pievieno turnīru vai precizē informāciju.','contactText'=>'Nosūti datumu, vietu, sākuma laiku, formātu un kontaktpersonu — spēlētājiem viss būs viegli atrodams.','addressLabel'=>'Adrese','phoneLabel'=>'Tālrunis','emailLabel'=>'E-pasts','newsSliderKicker'=>'Jaunumi','newsSliderTitle'=>'Zolei.lv jaunumi un stāsti.','newsSliderText'=>'Trīs jaunākie ieraksti ar attēliem, īsu aprakstu un ērtu lightbox lasīšanas skatu.','blogLightboxHint'=>'Nospied uz kartītes, lai lasītu','blogImageLabel'=>'Attēls','blogClose'=>'Aizvērt','shareFacebook'=>'Facebook','shareLinkedin'=>'LinkedIn','shareWhatsapp'=>'WhatsApp','shareX'=>'X','copyLink'=>'Kopēt saiti','copiedLink'=>'Nokopēts','copyPrompt'=>'Kopēt saiti:','readMore'=>'Lasīt vairāk','allNews'=>'Visi jaunumi','contactBtn'=>'Sazināties','galleryLoadMore'=>'Ielādēt vairāk foto','galleryOpen'=>'Atvērt foto','galleryClose'=>'Aizvērt','previous'=>'Iepriekšējais','next'=>'Nākamais','galleryCount'=>'foto no esošās Zolei.lv galerijas','formTitle'=>'Nosūtīt informāciju','formIntro'=>'Piesaki turnīru, precizējumu vai jautājumu. Forma strādā latviski un angliski.','formName'=>'Vārds','formEmail'=>'E-pasts','formPhone'=>'Tālrunis','formSubject'=>'Temats','formMessage'=>'Ziņa','formSubmit'=>'Nosūtīt ziņu','formSuccess'=>'Paldies! Ziņa nosūtīta.','formRequired'=>'Obligāts lauks','partnerKicker'=>'Partneris','partnerTitle'=>'Uzspēlē Zoli tiešsaistē','partnerText'=>'Partnera saite spēlētājiem, kuri vēlas trenēties un spēlēt arī ārpus turnīriem.','partnerButton'=>'Atvērt partnera lapu','infoKicker'=>'Informācija','infoTitle'=>'Valde, ētika un nolikumi vienā skatā.','infoText'=>'','boardTitle'=>'Valde un kontakti','boardText'=>'Latvijas Zolītes federācijas kontaktinformācija un valdes saziņa.','boardHtml'=>'<p><strong>Uldis Vītols:</strong> info@zolei.lv</p><p><strong>Elgars Sapats:</strong> info@zolei.lv, tālr. 22315099</p>','ethicsTitle'=>'Ētikas kodekss','ethicsText'=>'Godīga spēle, cieņa pret pretinieku un skaidra uzvedība turnīros.','ethicsHtml'=>'<p><strong>Zolītes spēles ētikas kodekss</strong> nosaka spēlētāju uzvedības pamatprincipus.</p><ol><li>Spēlē atbilstoši noteikumiem.</li><li>Izturies pret citiem spēlētājiem ar cieņu.</li><li>Nemānies un negodīgi neizmanto citus spēlētājus.</li><li>Kontrolē sevi un cieni turnīra organizatorus.</li><li>Strīdus risini mierīgi un korekti.</li></ol>','regulationsTitle'=>'Nolikumi','regulationsText'=>'Turnīru nolikumi un spēles dokumenti PDF sadaļā.','regulationsHtml'=>'<p>Nolikumu sadaļā tiek glabāti turnīru noteikumi, afišas un ar sacensībām saistītie PDF dokumenti.</p><p>PDF faili paliek vieni un tie paši latviešu un angļu skatam; tulkoti ir tikai virsraksti un apraksti.</p>','openModal'=>'Atvērt','closeModal'=>'Aizvērt','archiveSidebarTitle'=>'Arhīva sadaļa','archiveSidebarText'=>'Arhīvā saglabāti vēsturiskie turnīru rezultāti, kausi, reitingi un citi dokumenti no esošās Zolei.lv mājaslapas. Meklē pēc gada vai nosaukuma, bet mapju struktūra paliek kā vecajā wp-content/uploads/arhivs direktorijā.','archiveSidebarPoint1'=>'Saglabātas vecās mapes un PDF ceļi.','archiveSidebarPoint2'=>'Var meklēt pēc gada, turnīra vai faila nosaukuma.','archiveSidebarPoint3'=>'Jauni arhīva PDF pievienojami administrācijas PDF pārvaldniekā.','formHcaptchaMissing'=>'hCaptcha atslēgu var iestatīt administrācijā.'
+        'kicker'=>'Latvijas Zolītes federācija','heroTitle'=>'Zolīte ar raksturu.','heroText'=>'Turnīru kalendārs, noteikumi, rezultāti un reitingi vienā elegantā, viegli lietojamā vietā spēlētājiem un organizatoriem.','heroSubline'=>'Mārupe. Labvēlīgam lidojumam teicama starta vieta','calendarBtn'=>'Skatīt turnīrus','rulesBtn'=>'Klasiskās zoles noteikumi','fullRulesBtn'=>'Pilnie noteikumi','monthTabs'=>'mēnešu tabs','eventsPreview'=>'notikumi kalendārā','twoLang'=>'divas valodas','cardTitle'=>'Nākamais galds gaida','cardText'=>'Atrodi tuvāko turnīru, formātu, vietu un kontaktinformāciju.','openCalendar'=>'Atvērt kalendāru','quickKicker'=>'Galvenās sadaļas','quickTitle'=>'Skaidrs ceļš katram spēlētājam.','quickText'=>'','navCalendar'=>'Turnīri','navCalendarText'=>'Pārskatāms 12 mēnešu kalendārs; aktuālais mēnesis atveras automātiski, mobilajā skatā katru mēnesi var ērti izvērst.','navRules'=>'Noteikumi','navRulesText'=>'Klasiskās zoles pamati un pilnā noteikumu lapa.','navResults'=>'Rezultāti','navResultsText'=>'PDF rezultāti, nolikumi, reitingi un arhīvs.','navContact'=>'Saziņa','navContactText'=>'Adrese, epasts un skaidrs turnīra pieteikšanas aicinājums.','calendarKicker'=>'Turnīru kalendārs','calendarTitle'=>'12 mēneši, viegli pārskatāmi.','calendarText'=>'Ātri apskati katru mēnesi. Aktuālais mēnesis atveras automātiski, bet mobilajā skatā katrs mēnesis ir liela, viegli salasāma izvēršama sadaļa.','fullCalendar'=>'Pilns kalendārs','monthSource'=>'Turnīri tiek pārvaldīti WordPress administrācijā un automātiski grupēti pēc datuma.','monthPage'=>'Mēneša lapa','rulesKicker'=>'Klasiskā zole','rulesTitle'=>'Noteikumi bez sarežģījumiem.','rulesText'=>'Īsais noteikumu bloks palīdz jaunam spēlētājam ātri saprast spēles pamatu, bet pieredzējušam — pārbaudīt detaļas.','rule1'=>'Spēlē izmanto 26 kārtis.','rule2'=>'Trumpji: dāmas, kalpi, pēc tam kāravi.','rule3'=>'Lielajam vajag vismaz 61 aci.','rule4'=>'Uzvar stratēģija, atmiņa un mierīga spēle.','newsKicker'=>'Aktualitātes','newsTitle'=>'Svarīgi paziņojumi paliek redzami.','newsText'=>'Čempionātu posmi, kalendāra izmaiņas, ētikas kodekss un valdes informācija ir jāatrod ātri.','notice1Title'=>'Latvijas čempionāta posmi','notice1Text'=>'Aktualitāšu kartītes palīdz izcelt būtisko un aizvest uz pilnu informāciju.','notice2Title'=>'Ētikas kodekss','notice2Text'=>'Godīga spēle, cieņpilna uzvedība un skaidri turnīra principi.','galleryKicker'=>'Foto galerija','galleryTitle'=>'Spēles mirkļi no Latvijas zoles galdiem.','galleryText'=>'Sākumlapas galerijas slīdnis un paplašināmā foto siena izmanto esošās Zolei.lv galerijas bildes, lai jaunajā lapā ienestu Latvijas turnīru atmosfēru.','gallerySlideTitle'=>'Turnīru atmosfēra','gallerySlideText'=>'Spēlētāji, uzvarētāji un zoles kopienas mirkļi.','contactKicker'=>'Kontakti','contactTitle'=>'Pievieno turnīru vai precizē informāciju.','contactText'=>'Nosūti datumu, vietu, sākuma laiku, formātu un kontaktpersonu — spēlētājiem viss būs viegli atrodams.','addressLabel'=>'Adrese','phoneLabel'=>'Tālrunis','emailLabel'=>'E-pasts','newsSliderKicker'=>'Jaunumi','newsSliderTitle'=>'Zolei.lv jaunumi un stāsti.','newsSliderText'=>'Trīs jaunākie ieraksti ar attēliem, īsu aprakstu un ērtu lightbox lasīšanas skatu.','blogLightboxHint'=>'Nospied uz kartītes, lai lasītu','blogImageLabel'=>'Attēls','blogClose'=>'Aizvērt','shareFacebook'=>'Facebook','shareLinkedin'=>'LinkedIn','shareWhatsapp'=>'WhatsApp','shareX'=>'X','copyLink'=>'Kopēt saiti','copiedLink'=>'Nokopēts','copyPrompt'=>'Kopēt saiti:','readMore'=>'Lasīt vairāk','allNews'=>'Visi jaunumi','contactBtn'=>'Sazināties','galleryLoadMore'=>'Ielādēt vairāk foto','galleryOpen'=>'Atvērt foto','galleryClose'=>'Aizvērt','previous'=>'Iepriekšējais','next'=>'Nākamais','galleryCount'=>'foto no esošās Zolei.lv galerijas','formTitle'=>'Nosūtīt informāciju','formIntro'=>'Piesaki turnīru, precizējumu vai jautājumu. Forma strādā latviski un angliski.','formName'=>'Vārds','formEmail'=>'E-pasts','formPhone'=>'Tālrunis','formSubject'=>'Temats','formMessage'=>'Ziņa','formSubmit'=>'Nosūtīt ziņu','formSuccess'=>'Paldies! Ziņa nosūtīta.','formRequired'=>'Obligāts lauks','partnerKicker'=>'Partneris','partnerTitle'=>'Uzspēlē Zoli tiešsaistē','partnerText'=>'Partnera saite spēlētājiem, kuri vēlas trenēties un spēlēt arī ārpus turnīriem.','partnerButton'=>'Atvērt partnera lapu','infoKicker'=>'Informācija','infoTitle'=>'Valde, ētika un nolikumi vienā skatā.','infoText'=>'','boardTitle'=>'Valde un kontakti','boardText'=>'Latvijas Zolītes federācijas kontaktinformācija un valdes saziņa.','boardHtml'=>'<p><strong>Uldis Vītols:</strong> info@zolei.lv</p><p><strong>Elgars Sapats:</strong> info@zolei.lv, tālr. 22315099</p>','ethicsTitle'=>'Ētikas kodekss','ethicsText'=>'Godīga spēle, cieņa pret pretinieku un skaidra uzvedība turnīros.','ethicsHtml'=>'<p><strong>Zolītes spēles ētikas kodekss</strong> nosaka spēlētāju uzvedības pamatprincipus.</p><ol><li>Spēlē atbilstoši noteikumiem.</li><li>Izturies pret citiem spēlētājiem ar cieņu.</li><li>Nemānies un negodīgi neizmanto citus spēlētājus.</li><li>Kontrolē sevi un cieni turnīra organizatorus.</li><li>Strīdus risini mierīgi un korekti.</li></ol>','regulationsTitle'=>'Nolikumi','regulationsText'=>'Turnīru nolikumi un spēles dokumenti PDF sadaļā.','regulationsHtml'=>'<p>Nolikumu sadaļā tiek glabāti turnīru noteikumi, afišas un ar sacensībām saistītie PDF dokumenti.</p><p>PDF faili paliek vieni un tie paši latviešu un angļu skatam; tulkoti ir tikai virsraksti un apraksti.</p>','openModal'=>'Atvērt','closeModal'=>'Aizvērt','archiveSidebarTitle'=>'Arhīva sadaļa','archiveSidebarText'=>'Arhīvā saglabāti vēsturiskie turnīru rezultāti, kausi, reitingi un citi dokumenti no esošās Zolei.lv mājaslapas. Meklē pēc gada vai nosaukuma, bet mapju struktūra paliek kā vecajā wp-content/uploads/arhivs direktorijā.','archiveSidebarPoint1'=>'Saglabātas vecās mapes un PDF ceļi.','archiveSidebarPoint2'=>'Var meklēt pēc gada, turnīra vai faila nosaukuma.','archiveSidebarPoint3'=>'Jauni arhīva PDF pievienojami administrācijas PDF pārvaldniekā.','formHcaptchaMissing'=>'hCaptcha atslēgu var iestatīt administrācijā.'
     );
+    $calendar_anchor = add_query_arg(array('year'=>$calendar_year), home_url('/')) . '#calendar';
+    $home_urls = array(
+        'calendar'=>$calendar_anchor,
+        'rules'=>home_url('/#rules'),
+        'fullRules'=>function_exists('zolei_home_rules_url') ? zolei_home_rules_url() : home_url('/zoles-noteikumi/'),
+        'results'=>home_url('/#results'),
+        'contact'=>home_url('/#contact'),
+        'fullCalendar'=>$calendar_anchor,
+        'news'=>home_url('/#news'),
+        'partner'=>function_exists('zolei_home_partner_url') ? zolei_home_partner_url() : 'https://goo.gl/g7jJpm',
+        'board'=>home_url('/valde-un-kontakti/'),
+        'ethics'=>home_url('/etikas-kodekss/'),
+        'regulations'=>home_url('/nolikumi/'),
+    );
+    if (function_exists('zolei_front_page_block_overrides')) {
+        $block_overrides = zolei_front_page_block_overrides($t, $home_urls);
+        $t = $block_overrides['labels'];
+        $home_urls = $block_overrides['urls'];
+    }
+    if (function_exists('zolei_apply_home_content_overrides')) { $t = zolei_apply_home_content_overrides($t); }
+    $partner_banner = function_exists('zolei_home_partner_banner_url') ? zolei_home_partner_banner_url() : '';
+    if ($partner_banner === '') { $partner_banner = zolei_asset_image_url('zole.gif'); }
+    $news_count = max(1, min(12, absint(get_option('zolei_home_news_count', 3))));
     return array(
         'lang' => $is_en ? 'en':'lv',
-        'logo' => get_template_directory_uri().'/assets/images/zole-logo.jpg',
-        'partnerBanner' => get_template_directory_uri().'/assets/images/zole.gif',
+        'logo' => zolei_asset_image_url('zole-logo.jpg'),
+        'partnerBanner' => $partner_banner,
         'months' => $months,
+        'calendarYear' => $calendar_year,
+        'calendarYears' => function_exists('zolei_tournament_years') ? zolei_tournament_years() : array($calendar_year),
         'gallery' => zolei_gallery_items(),
-        'news' => zolei_home_news(3),
+        'news' => zolei_home_news($news_count),
         'eventCount' => array_sum(array_map(function($m){ return isset($m['events']) && is_array($m['events']) ? count($m['events']) : 0; }, $months)),
         'currentMonth' => zolei_requested_month_number($months),
         'labels' => $t,
         'settings' => zolei_settings(),
         'sections' => zolei_get_one_page_sections(),
-        'urls' => array('calendar'=>home_url('/#calendar'),'rules'=>home_url('/#rules'),'fullRules'=>home_url('/zoles-noteikumi/'),'results'=>home_url('/#results'),'contact'=>home_url('/#contact'),'fullCalendar'=>home_url('/#calendar'),'news'=>home_url('/#news'),'partner'=>'https://goo.gl/g7jJpm','board'=>home_url('/valde-un-kontakti/'),'ethics'=>home_url('/etikas-kodekss/'),'regulations'=>home_url('/nolikumi/')),
+        'urls' => $home_urls,
     );
 }
 function zolei_rest_home() { return rest_ensure_response(zolei_home_payload()); }
@@ -524,7 +668,7 @@ add_action('rest_api_init', function() { register_rest_route('zolei/v1','/home',
 function zolei_bbuilder_home_content($lang='lv') {
     $is_en = $lang === 'en';
     $title = $is_en ? 'Zolīte with character.' : 'Zolīte ar raksturu.';
-    $text = $is_en ? 'Headless React homepage renders the live design, while this page content remains editable with WP BBuilder blocks.' : 'Headless React sākumlapa attēlo dzīvo dizainu, bet lapas saturs paliek rediģējams ar WP BBuilder blokiem.';
+    $text = $is_en ? 'Tournament calendar, rules, results and ratings in one elegant, easy-to-use place for players and organisers.' : 'Turnīru kalendārs, noteikumi, rezultāti un reitingi vienā elegantā, viegli lietojamā vietā spēlētājiem un organizatoriem.';
     $button = $is_en ? 'View calendar' : 'Skatīt turnīrus';
     $fields = $is_en ? array(
         array('type'=>'text','name'=>'name','label'=>'Name','required'=>true,'width'=>6,'placeholder'=>'Your name'),
@@ -547,6 +691,8 @@ function zolei_bbuilder_home_content($lang='lv') {
 }
 
 require_once get_template_directory() . '/inc/content-types.php';
+require_once get_template_directory() . '/inc/tournaments.php';
+require_once get_template_directory() . '/inc/homepage-editor.php';
 require_once get_template_directory() . '/inc/pdf-compression.php';
 require_once get_template_directory() . '/inc/ajax-search.php';
 require_once get_template_directory() . '/inc/theme-admin.php';

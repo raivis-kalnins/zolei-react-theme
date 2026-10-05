@@ -1,6 +1,25 @@
 # Zolei React Theme
 
-Version 3.1.1 packages the launch-ready React-style WordPress theme for Zolei.lv with WP BBuilder compatibility, old-site content migration helpers, mobile tournament improvements and production integrations.
+Version 3.4.0 packages the launch-ready React-style WordPress theme for Zolei.lv with WP BBuilder compatibility, old-site content migration helpers, mobile tournament improvements and production integrations.
+
+
+## v3.4.0 compact Turnīri + fast PDF workflow
+
+- Replaces the one-CPT-per-tournament admin workflow with one compact **Turnīri** screen: 12 month tabs, inline editing, drag/drop ordering, duplicate/delete and bulk paste.
+- Seeds the calendar from the packaged zolei.lv snapshot first, preserves missing historical month/year groups from the database, and can sync all 12 live month pages from **zolei.lv** in one click. The frontend automatically uses the current available year instead of falling to an empty calendar.
+- Keeps the old `zolei_tournament` post type hidden only for rollback/migration compatibility; daily tournament editing no longer uses CPT posts.
+- Hides the raw `zolei_pdf` admin list and adds **Turnīri → PDF faili** with multi-file drag/drop upload. PDF records are created automatically in the background so the existing results/rating/archive frontend remains compatible.
+- Fixes date parsing so score notation such as `10/28/1` is not mistaken for a date, preserves known source days for date-less rows, and keeps manual drag/drop edits from being overwritten by later syncs.
+
+## v3.3.0 dynamic tournaments + theme-side homepage editing
+
+- v3.3 originally introduced editable tournament records; v3.4 supersedes that CPT workflow with the compact month-by-month manager above.
+- Imports the packaged legacy month calendar into editable tournament records once, so future monthly updates are no longer tied to the hard-coded JSON file.
+- Adds **Appearance -> Homepage editor** with bilingual LV/EN controls for hero, quick links, calendar, news, gallery, contact, partner and information copy, plus hero/partner images, links, news count and default calendar year.
+- Adds a theme-only Gutenberg compatibility registration for `wpbb/hero` when WP BBuilder does not register that block on this site. WP BBuilder itself is not changed.
+- The live React homepage reads Hero, CTA and Dynamic Form attributes from the saved front-page blocks, while explicit Homepage editor values can override them.
+- Keeps the v3.2 AVIF, image path repair, SEO/performance and hCaptcha fixes.
+
 
 
 ## v3.1.1 hCaptcha + mobile tournament fix
@@ -27,10 +46,10 @@ Version 3.1.1 packages the launch-ready React-style WordPress theme for Zolei.lv
 ## Recommended install flow
 
 1. Install and activate WP BBuilder.
-2. Upload and activate this theme.
+2. Upload and activate this theme, then open **Turnīri** once. The compact manager seeds itself from the packaged zolei.lv snapshot/database history and attempts a live zolei.lv sync.
 3. Go to **Appearance → Zolei demo import** and click **Import / Update one-page site only, then Import packaged PDFs only when ready**.
 4. Go to **Appearance → Zolei settings** to review gallery, contact details and PDF management.
-5. Review **Zolei PDF files** in wp-admin and update any labels/types/months before launch.
+5. Use **Turnīri → PDF faili** for fast multi-PDF drag/drop upload; the raw PDF CPT screen is hidden.
 
 ## PDF migration notes
 

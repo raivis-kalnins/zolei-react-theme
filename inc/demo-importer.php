@@ -51,7 +51,7 @@ function zolei_demo_blog_post_items() {
                 'excerpt'=>'The one-page experience brings calendar, rules, results, ratings and contact options together.',
                 'content'=>'The new Zolei.lv homepage is designed as a clear guide for Latvian Zolīte players. It brings the tournament calendar, PDF results, ratings, rules and federation contacts into one elegant page. Administrators can update the content in WordPress while visitors get a fast and modern experience.'
             ),
-            'image'=>'news-zolei-home.jpg'
+            'image'=>'news-zolei-home.avif'
         ),
         array(
             'lv'=>array(
@@ -66,7 +66,7 @@ function zolei_demo_blog_post_items() {
                 'excerpt'=>'PDF documents keep the old upload directory structure but become easier to browse in the new design.',
                 'content'=>'Results, ratings, protocols and archive PDFs stay in the existing wp-content/uploads folders so the old link structure and workflow remain familiar. On the new page they are displayed as clean cards with search, year filters and quick open buttons.'
             ),
-            'image'=>'news-results-ratings.jpg'
+            'image'=>'news-results-ratings.avif'
         ),
         array(
             'lv'=>array(
@@ -81,7 +81,7 @@ function zolei_demo_blog_post_items() {
                 'excerpt'=>'The contact form helps send tournament date, location, format and contact person in Latvian or English.',
                 'content'=>'Organisers can send tournament information, corrections or questions through a simple contact form. The form works in Latvian and English, and hCaptcha protection helps reduce unwanted messages.'
             ),
-            'image'=>'news-tournament-submit.jpg'
+            'image'=>'news-tournament-submit.avif'
         ),
     );
 }
@@ -96,7 +96,7 @@ function zolei_demo_import_blog_posts() {
             $content = '<!-- wp:paragraph --><p>' . esc_html($row['content']) . '</p><!-- /wp:paragraph -->';
             $id = zolei_demo_upsert_post($row['slug'], $row['title'], $content, $lang, $row['excerpt']);
             if (is_wp_error($id)) { continue; }
-            $image_url = preg_match('~^https?://~', $item['image']) ? $item['image'] : get_template_directory_uri() . '/assets/images/' . ltrim($item['image'], '/');
+            $image_url = preg_match('~^https?://~', $item['image']) ? $item['image'] : (function_exists('zolei_asset_image_url') ? zolei_asset_image_url($item['image']) : get_template_directory_uri() . '/assets/images/' . ltrim($item['image'], '/'));
             update_post_meta($id, '_zolei_blog_image', esc_url_raw($image_url));
             if (function_exists('pll_set_post_language')) { pll_set_post_language($id, $lang); }
             $translations[$lang] = $id;

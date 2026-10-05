@@ -10,8 +10,8 @@ function zolei_register_pdf_type() {
             'edit_item' => __('Edit PDF file','zolei-react'),
         ),
         'public' => true,
-        'show_ui' => true,
-        'show_in_menu' => true,
+        'show_ui' => false,
+        'show_in_menu' => false,
         'menu_icon' => 'dashicons-media-document',
         'supports' => array('title','editor','excerpt'),
         'has_archive' => false,
@@ -100,7 +100,9 @@ function zolei_register_section_type() {
         'labels'=>array('name'=>__('One-page sections','zolei-react'),'singular_name'=>__('One-page section','zolei-react'),'add_new_item'=>__('Add section','zolei-react'),'edit_item'=>__('Edit section','zolei-react')),
         'public'=>false,
         'show_ui'=>true,
-        'show_in_menu'=>false,
+        'show_in_menu'=>true,
+        'menu_icon'=>'dashicons-layout',
+        'menu_position'=>25,
         'show_in_rest'=>true,
         'menu_icon'=>'dashicons-layout',
         'supports'=>array('title','editor','page-attributes','revisions'),
@@ -323,12 +325,63 @@ function zolei_pdf_section_shortcode($atts = array()) {
 add_shortcode('zolei_pdf_section','zolei_pdf_section_shortcode');
 
 function zolei_calendar_shortcode() {
-    $months = zolei_calendar_months(); $current = intval(current_time('n')); ob_start();
-    echo '<div class="zole-shortcode-calendar"><div class="zole-month-tabs" role="tablist">';
-    foreach($months as $i=>$m){ $active = ($i+1)===$current ? ' active' : ''; echo '<button class="zole-month-tab'.$active.'" type="button" data-bs-toggle="pill" data-bs-target="#sc-'.$m['slug'].'"><span>'.esc_html(zolei_lang_is_en()?($m['en']??$m['lv']):($m['lv']??$m['en'])).'</span><em>'.count($m['events']??array()).'</em></button>'; }
+    $months = zolei_calendar_months();
+    $current = function_exists('zolei_requested_month_number') ? zolei_requested_month_number($months) : intval(current_time('n'));
+    $year = function_exists('zolei_calendar_year') ? zolei_calendar_year() : intval(current_time('Y'));
+    $years = function_exists('zolei_tournament_years') ? zolei_tournament_years() : array($year);
+    $is_en = function_exists('zolei_lang_is_en') && zolei_lang_is_en();
+    ob_start();
+    echo '<div class="zole-shortcode-calendar">';
+    if (count($years) > 1) {
+        echo '<div class="zole-calendar-year-links" aria-label="'.esc_attr($is_en ? 'Calendar year' : 'Kalendara gads').'">';
+        foreach ($years as $y) {
+            $url = add_query_arg(array('year'=>$y), home_url('/')) . '#calendar';
+            echo '<a class="zole-calendar-year-link'.((int)$y===(int)$year?' active':'').'" href="'.esc_url($url).'">'.esc_html($y).'</a>';
+        }
+        echo '</div>';
+    }
+    echo '<div class="zole-month-tabs" role="tablist">';
+    foreach($months as $i=>$m){
+        $active = ($i+1)===$current ? ' active' : '';
+        $label = $is_en ? ($m['en']??$m['lv']) : ($m['lv']??$m['en']);
+        echo '<button class="zole-month-tab'.$active.'" type="button" data-bs-toggle="pill" data-bs-target="#sc-'.esc_attr($m['slug']).'"><span>'.esc_html($label).'</span><em>'.count($m['events']??array()).'</em></button>';
+    }
     echo '</div><div class="tab-content zole-calendar-panel">';
-    foreach($months as $i=>$m){ $active = ($i+1)===$current ? ' show active' : ''; echo '<div id="sc-'.$m['slug'].'" class="tab-pane fade'.$active.'"><div class="zole-event-grid">'; foreach(($m['events']??array()) as $ev){ echo '<article class="zole-event"><div class="zole-event-date">'.esc_html($ev['day']??'').'</div><p>'.esc_html($ev['title']??'').'</p></article>'; } echo '</div></div>'; }
-    echo '</div></div>'; return ob_get_clean();
+    foreach($months as $i=>$m){
+        $active = ($i+1)===$current ? ' show active' : '';
+        echo '<div id="sc-'.esc_attr($m['slug']).'" class="tab-pane fade'.$active.'"><div class="zole-event-grid">';
+        $events = isset($m['events']) && is_array($m['events']) ? $m['events'] : array();
+        if (!$events) {
+            echo '<p class="zole-empty-events">'.esc_html($is_en ? 'No published tournaments.' : 'Nav publicetu turniru.').'</p>';
+        }
+        foreach($events as $ev){
+            echo '<article class="zole-event"><div class="zole-event-date">'.esc_html($ev['day']??'').'</div><div class="zole-event-copy">';
+            if (!empty($ev['title'])) { echo '<h4 class="zole-event-title">'.esc_html($ev['title']).'</h4>'; }
+            $description = trim((string)($ev['description'] ?? ''));
+            if ($description === '' && !empty($ev['title']) && empty($ev['id'])) { $description = (string)$ev['title']; }
+            if ($description !== '') { echo '<p class="zole-event-description">'.esc_html($description).'</p>'; }
+            $meta = array();
+            if (!empty($ev['time'])) { $meta[] = array($is_en?'Time':'Laiks',$ev['time']); }
+            if (!empty($ev['location'])) { $meta[] = array($is_en?'Location':'Vieta',$ev['location']); }
+            if (!empty($ev['format'])) { $meta[] = array($is_en?'Format':'Formats',$ev['format']); }
+            if (!empty($ev['contact'])) { $meta[] = array($is_en?'Contact':'Kontakti',$ev['contact']); }
+            if ($meta) {
+                echo '<div class="zole-event-meta">';
+                foreach($meta as $row){ echo '<span class="zole-event-meta-item"><strong>'.esc_html($row[0]).':</strong> '.esc_html($row[1]).'</span>'; }
+                echo '</div>';
+            }
+            $links = isset($ev['links']) && is_array($ev['links']) ? $ev['links'] : array();
+            if ($links) {
+                echo '<div class="zole-event-links">';
+                foreach(array_slice($links,0,2) as $link){ if(empty($link['url'])) continue; echo '<a href="'.esc_url($link['url']).'" target="_blank" rel="noopener noreferrer">'.esc_html($link['label'] ?? ($is_en?'Document':'Dokuments')).'</a>'; }
+                echo '</div>';
+            }
+            echo '</div></article>';
+        }
+        echo '</div></div>';
+    }
+    echo '</div></div>';
+    return ob_get_clean();
 }
 add_shortcode('zolei_calendar','zolei_calendar_shortcode');
 

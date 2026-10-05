@@ -40,18 +40,44 @@ function zolei_output_basic_seo() {
         if ($excerpt !== '') { $description = wp_trim_words($excerpt, 30, ''); }
     }
     $url = is_singular() ? get_permalink() : home_url('/');
-    $logo = get_template_directory_uri() . '/assets/images/zole-logo.jpg';
+    $logo = function_exists('zolei_asset_image_url') ? zolei_asset_image_url('zole-logo.jpg', false) : get_template_directory_uri() . '/assets/images/zole-logo.jpg';
+    $social_image = function_exists('zolei_asset_image_url') ? zolei_asset_image_url('news-zolei-home.jpg', false) : get_template_directory_uri() . '/assets/images/news-zolei-home.jpg';
+
     echo '<meta name="description" content="' . esc_attr($description) . '">' . "\n";
     echo '<link rel="canonical" href="' . esc_url($url) . '">' . "\n";
     echo '<meta property="og:type" content="' . (is_singular('post') ? 'article' : 'website') . '">' . "\n";
     echo '<meta property="og:title" content="' . esc_attr($title) . '">' . "\n";
     echo '<meta property="og:description" content="' . esc_attr($description) . '">' . "\n";
     echo '<meta property="og:url" content="' . esc_url($url) . '">' . "\n";
-    echo '<meta property="og:image" content="' . esc_url($logo) . '">' . "\n";
+    echo '<meta property="og:image" content="' . esc_url($social_image) . '">' . "\n";
+    echo '<meta property="og:image:width" content="1280">' . "\n";
+    echo '<meta property="og:image:height" content="720">' . "\n";
+    echo '<meta property="og:image:alt" content="' . esc_attr($title) . '">' . "\n";
     echo '<meta name="twitter:card" content="summary_large_image">' . "\n";
+    echo '<meta name="twitter:title" content="' . esc_attr($title) . '">' . "\n";
+    echo '<meta name="twitter:description" content="' . esc_attr($description) . '">' . "\n";
+    echo '<meta name="twitter:image" content="' . esc_url($social_image) . '">' . "\n";
+
     $schema = array(
-        '@context'=>'https://schema.org','@type'=>'Organization','name'=>'Latvijas Zolītes federācija',
-        'url'=>home_url('/'),'logo'=>$logo,'email'=>get_option('zolei_contact_email','info@zolei.lv')
+        '@context'=>'https://schema.org',
+        '@graph'=>array(
+            array(
+                '@type'=>'Organization',
+                '@id'=>home_url('/#organization'),
+                'name'=>'Latvijas Zolītes federācija',
+                'url'=>home_url('/'),
+                'logo'=>array('@type'=>'ImageObject','url'=>$logo,'width'=>536,'height'=>536),
+                'email'=>get_option('zolei_contact_email','info@zolei.lv')
+            ),
+            array(
+                '@type'=>'WebSite',
+                '@id'=>home_url('/#website'),
+                'url'=>home_url('/'),
+                'name'=>get_bloginfo('name') ?: 'Zolei.lv',
+                'publisher'=>array('@id'=>home_url('/#organization')),
+                'inLanguage'=>function_exists('zolei_lang_is_en') && zolei_lang_is_en() ? 'en-GB' : 'lv-LV'
+            )
+        )
     );
     echo '<script type="application/ld+json">' . wp_json_encode($schema, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) . '</script>' . "\n";
 }
